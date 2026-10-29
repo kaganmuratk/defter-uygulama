@@ -13,6 +13,7 @@ jobs:
       - name: iOS projesini oluştur
         run: |
           npx cap add ios
+          cp assets/icon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
           npx cap sync ios
       - name: Imzasız derle
         run: |

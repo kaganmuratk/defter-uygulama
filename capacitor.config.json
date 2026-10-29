@@ -1,6 +1,6 @@
 {
   "appId": "com.kagan.fizyoloji",
-  "appName": "Fizyoloji",
+  "appName": "Defter",
   "webDir": "www",
   "ios": { "contentInset": "never", "backgroundColor": "#EFF2F1" }
 }
