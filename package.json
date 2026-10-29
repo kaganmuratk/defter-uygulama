@@ -1,0 +1,8 @@
+{
+  "name": "defter-uygulama",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": { "sunucu": "python3 -m http.server 8766 --bind 127.0.0.1 --directory www" },
+  "dependencies": { "@capacitor/core": "^7.0.0", "@capacitor/ios": "^7.0.0" },
+  "devDependencies": { "@capacitor/cli": "^7.0.0" }
+}

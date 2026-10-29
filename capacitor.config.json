@@ -1,0 +1,6 @@
+{
+  "appId": "com.kagan.fizyoloji",
+  "appName": "Fizyoloji",
+  "webDir": "www",
+  "ios": { "contentInset": "never", "backgroundColor": "#EFF2F1" }
+}
