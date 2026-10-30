@@ -79,18 +79,29 @@ const Icerik = {
     if (!this._db) this._db = new Promise((coz, red) => {
       const i = indexedDB.open('fz-icerik', 1);
       i.onupgradeneeded = () => i.result.createObjectStore('dosya');
-      i.onsuccess = () => coz(i.result); i.onerror = () => red(i.error);
-    });
+      i.onsuccess = () => { i.result.onclose = () => { this._db = null; }; coz(i.result); };
+      i.onerror = () => red(i.error);
+    }).catch((e) => { this._db = null; throw e; });
     return this._db;
   },
-  async al(anahtar) {
-    const db = await this.db();
-    return new Promise((coz) => { const r = db.transaction('dosya').objectStore('dosya').get(anahtar); r.onsuccess = () => coz(r.result); r.onerror = () => coz(undefined); });
+  // iPad uygulamayı arka plana alıp geri getirince WebKit'in IndexedDB bağlantısı kopabiliyor
+  // ("Connection to Indexed Database server lost"); bu durumda transaction() hata atar. Eskiden bu hata
+  // internetten BAŞARIYLA gelen içeriği de düşürüp "İçerik yüklenemedi" gösteriyordu (2026-10-30 kök neden adayı).
+  // Artık önbellek hatası içeriği asla engellemez; kopan bağlantı bir kez yeniden açılır.
+  async _islem(kip, is) {
+    for (let deneme = 0; deneme < 2; deneme++) {
+      try {
+        const db = await this.db();
+        return await new Promise((coz, red) => { const t = db.transaction('dosya', kip); is(t.objectStore('dosya'), coz, red); t.onerror = () => red(t.error); t.onabort = () => red(t.error); });
+      } catch (e) {
+        Tani.yaz('önbellek', { hata: (e && (e.name + ': ' + e.message)) || String(e), deneme: deneme + 1 });
+        this._db = null;   // bağlantıyı bırak, bir sonraki denemede yeniden aç
+      }
+    }
+    return undefined;
   },
-  async koy(anahtar, deger) {
-    const db = await this.db();
-    return new Promise((coz) => { const t = db.transaction('dosya', 'readwrite'); t.objectStore('dosya').put(deger, anahtar); t.oncomplete = () => coz(); t.onerror = () => coz(); });
-  },
+  al(anahtar) { return this._islem('readonly', (s, coz) => { const r = s.get(anahtar); r.onsuccess = () => coz(r.result); }); },
+  koy(anahtar, deger) { return this._islem('readwrite', (s, coz) => { s.put(deger, anahtar).onsuccess = () => coz(); }); },
   async ag(yol, ms = 10000, deneme = 3) {
     let sonHata = new Error('çevrimdışı');
     for (let i = 0; i < deneme; i++) {
@@ -116,13 +127,16 @@ const Icerik = {
     throw sonHata;
   },
   async json(yol) {
-    try { const v = await (await this.ag(yol)).json(); await this.koy('json:' + yol, v); return v; }
+    let v;
+    try { v = await (await this.ag(yol)).json(); }
     catch (e) { if (e.yetkisiz) throw e; const eski = await this.al('json:' + yol); if (eski) return eski; throw e; }
+    this.koy('json:' + yol, v);   // önbelleğe yazmak beklenmez ve başarısız olsa da içerik gösterilir
+    return v;
   },
   async gorsel(yol) {   // 'gorseller/x.png' → blob adresi
     const eski = await this.al('gorsel:' + yol);
     if (eski) return URL.createObjectURL(eski);
-    const b = await (await this.ag(yol, 20000)).blob(); await this.koy('gorsel:' + yol, b);
+    const b = await (await this.ag(yol, 20000)).blob(); this.koy('gorsel:' + yol, b);
     return URL.createObjectURL(b);
   },
 };
