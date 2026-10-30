@@ -135,7 +135,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
   min-height: calc(100vh - 3.4rem); min-height: calc(100dvh - 3.4rem);
   margin: 0 auto; padding: 2.2rem 1.4rem 1.5rem;
 }
-.sayfa > .metin, .sayfa > .sayfalama { width: 100%; max-width: var(--sutun); margin-left: auto; margin-right: auto; }
+/* Sabit genişlikli kâğıt (2026-10-30): genişlik ve en az yükseklik app.js'te kâğıt pikseliyle verilir,
+   ekrana transform: scale ile sığdırılır. Yazı boyutu SABİT (ekran boyutuna göre değişmez) ki yazı
+   dikey/yatayda aynı dizilsin ve çizimler kaymasın. */
+.sahne { position: relative; width: 100%; }
+.kagit { position: absolute; top: 0; left: 50%; transform-origin: top center; display: flex; flex-direction: column; font-size: 21px; line-height: 1.7; }
+.kagit.dar { font-size: 18px; }
+.kagit > .metin { width: 100%; }
+.kagit h1 { font: 800 2.55em/1.12 var(--yazi); }
+.tani pre { white-space: pre-wrap; font: .8rem/1.45 ui-monospace, monospace; margin: 0 0 1rem; }
 .sayfa .no { font-size: .95rem; font-weight: 700; color: var(--arter); margin: 0 0 .4rem; }
 .sayfa h1 { font: 800 clamp(1.9rem, 5.5vw, 2.7rem)/1.12 var(--yazi); letter-spacing: -.03em; margin: 0 0 1.6rem; }
 .metin { position: relative; }
@@ -167,7 +175,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cevaplar[open] summary { border-bottom: 1px solid var(--cizgi); margin-bottom: .9rem; }
 
 .sayfalama { display: flex; gap: .8rem; margin-top: auto; padding-top: 3rem; }
-.sayfa > .sayfalama { margin-bottom: calc(env(safe-area-inset-bottom) + 4.6rem); }
+/* Alttaki araç çubuğu kâğıdın son satırını/düğmeleri örtmesin */
+.kagit > .sayfalama { margin-bottom: 1.2rem; }
+.sayfa { padding-bottom: calc(env(safe-area-inset-bottom) + 6rem) !important; }
 .sayfalama button {
   flex: 1; min-height: 3.5rem; border-radius: 1.1rem; border: 1.5px solid var(--cizgi); background: var(--yuzey);
   font: 700 1.05rem/1.2 var(--yazi); display: flex; align-items: center; justify-content: center; gap: .5rem;
@@ -181,8 +191,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- Çizim katmanı ve araç çubuğu ---------- */
 .cizim { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; overflow: visible; }
+.cizim path { stroke: none; }
 .cizim-zemin { z-index: -1; }
-.cizim path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
 .cizim .fosforlu { mix-blend-mode: multiply; opacity: .55; }
 :root[data-tema="koyu"] .cizim .fosforlu { mix-blend-mode: screen; opacity: .4; }
 @media (prefers-color-scheme: dark) { :root:not([data-tema="acik"]) .cizim .fosforlu { mix-blend-mode: screen; opacity: .4; } }
@@ -192,6 +203,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-radius: 1.6rem; box-shadow: var(--gol); max-width: calc(100vw - 1rem);
 }
 .arac[hidden] { display: none; }
+.arac { flex-wrap: wrap; justify-content: center; width: max-content; }
 .arac button { width: 46px; height: 46px; border-radius: 50%; border: 0; background: none; display: grid; place-items: center; color: var(--murekkep); }
 .arac button[aria-pressed="true"] { background: var(--murekkep); color: var(--kemik); }
 .arac svg { width: 22px; height: 22px; }
@@ -279,10 +291,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .arac button:active { transform: scale(.92); }
 .arac .renk { width: 40px; height: 40px; }
 .arac .renk i { width: 24px; height: 24px; }
-.arac.kaydet-bar { gap: .7rem; padding: .6rem .95rem; bottom: calc(env(safe-area-inset-bottom) + 5rem); }
-/* Kayıt çubuğu açıkken sayfalama düğmeleri onun da üstünde kalsın (2026-10-30: çubuk 'Sonraki'yi örtüyordu) */
-.taslak-var .sayfa > .sayfalama { margin-bottom: calc(env(safe-area-inset-bottom) + 9.5rem); }
-.arac.kaydet-bar > span { font: 600 .95rem var(--yazi); padding: 0 .35rem; }
 .arac button.kaydet-d, .arac button.vazgec-d { width: auto; border-radius: 1.1rem; padding: 0 1.15rem; font: 700 .95rem var(--yazi); }
 .arac button.kaydet-d { background: var(--arter); color: #fff; }
 .arac button.vazgec-d { border: 1.5px solid var(--cizgi); background: none; }

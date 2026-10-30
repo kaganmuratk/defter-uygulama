@@ -28,6 +28,15 @@ const Depo = {
   cizimYaz(partId, veri) { this.yaz('cizim:' + partId, veri); },
 };
 
+/* ---------- Tanı kaydı: cihazda olan hataları sonradan görmek için (Ayarlar → Tanı kaydı) ---------- */
+const Tani = {
+  yaz(olay, ayrinti = {}) {
+    const k = Depo.oku('tani', []);
+    k.push({ z: new Date().toISOString().slice(5, 19).replace('T', ' '), olay, ...ayrinti });
+    Depo.yaz('tani', k.slice(-40));
+  },
+};
+
 /* ---------- Yardımcılar ---------- */
 const $ = (s, k = document) => k.querySelector(s);
 const el = (etiket, ozellik = {}, ...cocuklar) => {
@@ -98,6 +107,7 @@ const Icerik = {
         }
         return r;
       } catch (e) {
+        Tani.yaz('içerik isteği', { yol, deneme: i + 1, hata: e.name === 'AbortError' ? 'zaman aşımı' : e.message, cevrimici: navigator.onLine });
         if (e.yetkisiz || e.yeniden === false) throw e;
         sonHata = e;
       } finally { clearTimeout(z); }
@@ -239,8 +249,18 @@ function ayarEkrani(mesaj) {
       catch (e) { ayarEkrani(e.yetkisiz ? 'Anahtar kabul edilmedi.' : 'Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.'); }
     } }, el('span', {}, 'Kaydet')),
     Ayar.anahtar ? el('button', { class: 'ikincil', onclick: () => { Esle.hepsi().then(() => ayarEkrani()); } }, 'Şimdi eşitle') : null,
-    Ayar.anahtar ? el('button', { class: 'ikincil', onclick: () => { location.hash = '#/'; } }, 'Geri') : null);
+    Ayar.anahtar ? el('button', { class: 'ikincil', onclick: () => { location.hash = '#/'; } }, 'Geri') : null,
+    taniKutusu());
   uygulama.replaceChildren(kok);
+}
+
+function taniKutusu() {
+  const k = Depo.oku('tani', []);
+  if (!k.length) return null;
+  const satir = (x) => `${x.z}  ${x.olay}  ` + Object.entries(x).filter(([a]) => a !== 'z' && a !== 'olay').map(([a, v]) => `${a}=${v}`).join(' ');
+  return el('details', { class: 'cevaplar tani' }, el('summary', {}, `Tanı kaydı (${k.length})`),
+    el('pre', {}, k.slice().reverse().map(satir).join('\n')),
+    el('button', { class: 'ikincil', onclick: () => { Depo.yaz('tani', []); ayarEkrani(); } }, 'Kaydı temizle'));
 }
 
 /* ---------- Ana ekran: kitaplar (iç içe kütüphanenin ilk katmanı) ---------- */
@@ -397,11 +417,11 @@ async function partEkrani(id) {
       ? el('button', { class: 'bitir', 'aria-pressed': String(bitti), onclick: bitirDegis }, bitti ? 'Bitti, geri almak için dokun' : 'Bitirdim')
       : el('button', { class: 'ileri', onclick: () => git(sayfa + 1) }, 'Sonraki', el('span', { html: ikon(IKON.sag, 20) }));
     const geri = el('button', { disabled: sayfa === 0, onclick: () => git(sayfa - 1) }, el('span', { html: ikon(IKON.sol, 20) }), 'Önceki');
-    // Kalem katmanı ARTIK TÜM sayfa yüzeyinde (Kağan 2026-10-29: "ekranın her yerine yazayım").
-    // Önce metin+sayfalama basılır, sonra kalem katmanı en üste eklenir.
-    sayfaKutu.replaceChildren(
-      metin,
-      el('div', { class: 'sayfalama' }, geri, ileri));
+    // Sabit genişlikli kâğıt (Kağan 2026-10-30): metin her yönde aynı genişlikte dizilir, ekrana yalnız
+    // ölçeklenir. Böylece dikey↔yatay geçişte yazı yeniden akmaz, çizimler aynı yerde kalır (GoodNotes/Notability yolu).
+    // Kalem katmanı tüm sayfa yüzeyinde (Kağan 2026-10-29: "ekranın her yerine yazayım").
+    const kagit = el('div', { class: 'kagit' }, metin, el('div', { class: 'sayfalama' }, geri, ileri));
+    sayfaKutu.replaceChildren(el('div', { class: 'sahne' }, kagit));
     $('i', ilerlemeCubuk).style.width = ((sayfa + 1) / N * 100) + '%';
     [...liste.children].forEach((li, i) => {
       li.classList.toggle('simdi', i === sayfa);
@@ -414,7 +434,7 @@ async function partEkrani(id) {
       bImg.src = g.src; bImg.alt = g.alt; buyutec.classList.remove('yakin'); buyutec.hidden = false;
     });
     buyutec.onclick = () => { if (buyutec.classList.contains('yakin')) buyutec.hidden = true; else buyutec.classList.add('yakin'); };
-    kalem = kalemKatmani(`${id}#${sayfa}`, sayfaKutu);
+    kalem = kalemKatmani(`${id}#${sayfa}`, sayfaKutu, kagit);
   }
   async function cikis() {
     if (kalem && !(await kalem.cikisKontrol())) return;
@@ -424,117 +444,129 @@ async function partEkrani(id) {
   aktifTemizle = () => { if (kalem) kalem.kaldir(); $('#buyutec').hidden = true; };
 }
 
+/* ---------- Kâğıt ölçeği ----------
+   2026-10-30 (Kağan: "dikeyde boşluğa yazdığım not yataya çevirince başka yere geliyor"):
+   Metin sabit mantıksal genişlikte (KAGIT_GENISLIK) dizilir ve ekrana yalnız ölçeklenir. Yazı hiç
+   yeniden akmadığı için çizimler tek bir koordinat uzayında (kâğıt pikseli) saklanır ve hiç kaymaz.
+   Genişlik cihazın KISA kenarından seçilir; döndürmede değişmez. Telefonda daha dar kâğıt kullanılır
+   ki yazı okunur kalsın (çizimler cihaz düzenine bağlıdır; iPad ↔ telefon arası birebir eşleşmez). */
+const KISA_KENAR = Math.min(screen.width, screen.height);
+const KAGIT_GENISLIK = KISA_KENAR < 600 ? 400 : 800;
+const KAGIT_EN_BUYUK = 1.35;   // geniş yatay ekranda yazı aşırı büyümesin
+function kagitOlcegi(genislik) { return Math.min(Math.max(genislik, 200) / KAGIT_GENISLIK, KAGIT_EN_BUYUK); }
+// Kısa sayfada da Önceki/Sonraki en altta: kâğıdın en az yüksekliği dikey ekrandan hesaplanır ve
+// döndürmede DEĞİŞMEZ (yoksa altta boşluğa yazılan not yatayda düğmelerin altında kalırdı).
+// 240 px: üst çubuk, sayfa boşlukları ve alttaki araç çubuğu payı (dikeyde düğmeler kaydırmadan görünsün).
+const KAGIT_EN_AZ = Math.round((Math.max(screen.width, screen.height) - 240) / kagitOlcegi(KISA_KENAR - 32));
+
 /* ---------- Kalem katmanı ----------
-   2026-10-29 değişiklikleri (Kağan'ın geri bildirimleri):
-   - Yüzey artık tüm sayfa (metin sütunu değil): ekranın her yerine yazılır.
-   - Çizgiler içerik ÖĞELERİNE çapalanır (öğne): çizginin başladığı paragraf/başlık/görsel
-     + o öğenin kutusuna göre bağıl koordinat. Döndürmede satır yükseklikleri değişse de
-     çizgi aynı kelimenin yanında kalır (dikey↔yatay kayma sorunu).
-   - Çizim piksel uzayında (eski 1000 birimlik viewBox ölçeği çizgileri pikselleştiriyordu).
-   - Apple Pencil Pro: çift dokunuş → silgi; çizgi bitince → önceki araca dönüş. */
+   2026-10-29/30 (Kağan'ın geri bildirimleri):
+   - Yüzey tüm sayfa: ekranın her yerine yazılır; kâğıdın dışındaki kenar boşluğu da sayılır.
+   - Çizgiler kâğıt pikselinde saklanır (sürüm 3); eski sürümler ilk açılışta dönüştürülür.
+   - Çizgi şekli perfect-freehand ile (tldraw/Excalidraw'ın kullandığı yöntem): girdi yumuşatılır,
+     kalem basıncıyla kalınlık değişir, kenarlar pürüzsüz dolgu olarak çizilir ("piksel piksel" sorunu).
+   - Apple Pencil Pro/2: çift dokunuş ya da sıkıştırma → silgi; kalem ekrandan kalkınca → kalem. */
 const RENKLER = {
   kalem: [['mürekkep', 'var(--murekkep)'], ['lacivert', '#1c7ed6'], ['yeşil', '#2f9e44'], ['turuncu', '#e8590c'], ['bordo', '#c2255c'], ['mor', '#6741d9']],
   fosforlu: [['sarı', '#f3d44a'], ['yeşil', '#8fd694'], ['pembe', '#f4a6c0'], ['turuncu', '#f9a825'], ['mavi', '#74c0fc']],
 };
-const KALINLIK = { kalem: 3, fosforlu: 18 };
-const SILGI_YARI_CAP = 42;   // piksel; eski davranış 14/1000 birim ≈ 13-15 px'ti, aynı his
+const KALINLIK = { kalem: 3.2, fosforlu: 20 };
+const SILGI_YARI_CAP = 26;   // kâğıt pikseli
+const CIZGI_SURUM = 3;
 
 const CAPA_SELC = 'h1,h2,h3,h4,p,li,img,blockquote,hr,table,.tablo,ol,ul,.sayfalama,.cevaplar,figure';
 
-function kalemKatmani(partId, yuzey) {
+function kalemKatmani(partId, yuzey, kagit) {
   let veri = Depo.cizim(partId);
-  // 2026-10-29 öncesi çizimler .metin sütununa göre 1000 birimlik uzaydaydı.
-  // Yeni tam-sayfa yüzeyine taşırken eski çizgileri kaybetmeden dönüştür.
-  const eskiMetin = yuzey.querySelector('.metin');
-  if (eskiMetin && [...veri.kaydedilen, ...veri.taslak].some((c) => !c.onak)) {
-    const yr = yuzey.getBoundingClientRect(), mr = eskiMetin.getBoundingClientRect();
-    const w = Math.max(yuzey.clientWidth, 1), h = Math.max(yuzey.clientHeight, 1);
-    const cevir = (c) => {
-      if (c.onak) return c;
-      return { ...c, onak: 'y', noktalar: c.noktalar.map(([x, y]) => [
-        (mr.left - yr.left + (x / 1000) * mr.width) / w,
-        (mr.top - yr.top + (y / 1000) * mr.width) / h,
-      ]) };
-    };
-    veri.kaydedilen = veri.kaydedilen.map(cevir);
-    veri.taslak = veri.taslak.map(cevir);
+  const sahne = kagit.parentElement;
+  let olcek = 1;
+  function yerlestir() {
+    const stil = getComputedStyle(yuzey);
+    const genislik = yuzey.clientWidth - parseFloat(stil.paddingLeft) - parseFloat(stil.paddingRight);
+    olcek = kagitOlcegi(genislik);
+    kagit.style.transform = `translateX(-50%) scale(${olcek})`;
+    sahne.style.height = (kagit.offsetHeight * olcek) + 'px';
+  }
+  kagit.style.width = KAGIT_GENISLIK + 'px';
+  kagit.style.minHeight = KAGIT_EN_AZ + 'px';
+  if (KAGIT_GENISLIK < 800) kagit.classList.add('dar');
+  yerlestir();
+
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('class', 'cizim');
+  svg.setAttribute('aria-hidden', 'true');
+  kagit.append(svg);
+  // Fosforlu kalem, kaydedildikten sonra metnin ALTINA geçsin (okunabilirlik).
+  const zemin = document.createElementNS(SVG, 'svg');
+  zemin.setAttribute('class', 'cizim cizim-zemin');
+  zemin.setAttribute('aria-hidden', 'true');
+  kagit.prepend(zemin);
+  const katman = document.createElementNS(SVG, 'g');
+  svg.append(katman);
+  const zeminKatman = document.createElementNS(SVG, 'g');
+  zemin.append(zeminKatman);
+
+  // Eski sürüm çizgileri kâğıt pikseline çevir (bir kez; sonra sürüm 3 olarak kaydedilir).
+  // Sürüm 2: öğeye çapalı oranlar (onak = sayfa öğesi ya da 'y' = tüm yüzey). Sürüm 1: yüzey genişliğinin 1000'de biri.
+  // Eski düzen artık yok; dönüşüm bugünkü yerleşimden yaklaşık yapılır.
+  const onakEl = new Map();
+  kagit.querySelectorAll(CAPA_SELC).forEach((e, i) => onakEl.set('c' + (i + 1), e));
+  function kagitKutusu(e) {   // öğenin kâğıt pikselindeki kutusu (dönüşümden bağımsız)
+    const kr = kagit.getBoundingClientRect(), r = e.getBoundingClientRect();
+    return { x: (r.left - kr.left) / olcek, y: (r.top - kr.top) / olcek, w: r.width / olcek, h: r.height / olcek };
+  }
+  function eskiyiCevir(c) {
+    if (c.k === CIZGI_SURUM) return c;
+    const yk = kagitKutusu(yuzey);
+    let donustur;
+    if (!c.onak) donustur = ([x, y]) => [yk.x + x / 1000 * yk.w, yk.y + y / 1000 * yk.w];
+    else if (c.onak === 'y') donustur = ([x, y]) => [yk.x + x * yk.w, yk.y + y * yk.h];
+    else {
+      const e = onakEl.get(c.onak), b = e ? kagitKutusu(e) : { x: 0, y: 0, w: KAGIT_GENISLIK, h: KAGIT_EN_AZ };
+      donustur = ([x, y]) => [b.x + x * b.w, b.y + y * b.h];
+    }
+    const { onak, ax, ay, ...kalan } = c;
+    return { ...kalan, k: CIZGI_SURUM, noktalar: c.noktalar.map((p) => [...donustur(p).map((v) => Math.round(v * 10) / 10), 0.5]) };
+  }
+  if ([...veri.kaydedilen, ...veri.taslak].some((c) => c.k !== CIZGI_SURUM)) {
+    veri.kaydedilen = veri.kaydedilen.map(eskiyiCevir);
+    veri.taslak = veri.taslak.map(eskiyiCevir);
     Depo.cizimYaz(partId, veri);
   }
+
   let arac = 'kalem';
   let renk = { kalem: 'mürekkep', fosforlu: 'sarı' };
   let aktifCizgi = null;
   let aktifYol = null;   // çizilmekte olan çizginin <path> öğesi
   const fareIle = location.search.includes('fare');
 
-  const svg = document.createElementNS(SVG, 'svg');
-  svg.setAttribute('class', 'cizim');
-  svg.setAttribute('aria-hidden', 'true');
-  yuzey.append(svg);
-  // Fosforlu kalem, kaydedildikten sonra metnin ALTINA geçsin (okunabilirlik).
-  const zemin = document.createElementNS(SVG, 'svg');
-  zemin.setAttribute('class', 'cizim cizim-zemin');
-  zemin.setAttribute('aria-hidden', 'true');
-  yuzey.prepend(zemin);
-  const katman = document.createElementNS(SVG, 'g');
-  svg.append(katman);
-  const zeminKatman = document.createElementNS(SVG, 'g');
-  zemin.append(zeminKatman);
-
-  let onakSayac = 0;
-  const onakEl = new Map();   // onak id -> element
-  yuzey.querySelectorAll(CAPA_SELC).forEach((e) => { const a = 'c' + (++onakSayac); e.setAttribute('data-ciz-onak', a); onakEl.set(a, e); });
-  yuzey.setAttribute('data-ciz-onak', 'y');
-
-  function boyutla() {
-    const w = yuzey.clientWidth || 1, h = yuzey.clientHeight || 1;
-    for (const kat of [svg, zemin]) {
-      kat.setAttribute('width', w);
-      kat.setAttribute('height', h);
-      kat.setAttribute('viewBox', `0 0 ${w} ${h}`);
-    }
-  }
-  const ro = new ResizeObserver(() => { boyutla(); ciz(); });
-  ro.observe(yuzey); boyutla();
-  const don = () => { boyutla(); ciz(); setTimeout(() => { boyutla(); ciz(); }, 350); };   // döndürme sonrası geç düzen
+  const ro = new ResizeObserver(() => yerlestir());
+  ro.observe(yuzey); ro.observe(kagit);
+  const don = () => { yerlestir(); setTimeout(yerlestir, 350); };   // döndürme sonrası geç düzen
   addEventListener('orientationchange', don);
 
-  function kutu(c) {   // çizginin çapasının ŞU ANDAKİ kutusu (yüzeyin sol üstüne göre, px)
-    const e = c.onak === 'y' ? yuzey : yuzey.querySelector(`[data-ciz-onak="${c.onak}"]`);
-    if (!e) return null;
-    const yr = yuzey.getBoundingClientRect(), r = e.getBoundingClientRect();
-    return { x: r.left - yr.left, y: r.top - yr.top, w: Math.max(r.width, 1), h: Math.max(r.height, 1) };
-  }
-  const piksel = (c, p) => {
-    if (!c.onak) {   // v1 (2026-10-29 öncesi): 1000 birimlik genişlik uzayı — eski konumunda kalsın
-      const w = yuzey.clientWidth || 1;
-      return [p[0] / 1000 * w, p[1] / 1000 * w];
-    }
-    const r = kutu(c);
-    return r ? [r.x + p[0] * r.w, r.y + p[1] * r.h] : null;
-  };
-
   const renkDeger = (ad) => (Object.values(RENKLER).flat().find((r) => r[0] === ad) || [0, 'currentColor'])[1];
-  function yolda(noktalar) {
-    const p = [];
-    for (const n of noktalar) if (!p.length || Math.hypot(n[0] - p[p.length - 1][0], n[1] - p[p.length - 1][1]) > 0.7) p.push(n);
-    if (!p.length) return 'M0 0';
-    if (p.length === 1) return `M${p[0][0]} ${p[0][1]}l0.01 0`;
-    let d = `M${p[0][0]} ${p[0][1]}`;
-    for (let i = 1; i < p.length - 1; i++) {
-      const [x, y] = p[i], [nx, ny] = p[i + 1];
-      d += `Q${x} ${y} ${(x + nx) / 2} ${(y + ny) / 2}`;
+  function sekil(c) {   // perfect-freehand: çizginin dolgu çokgeni → SVG yolu
+    const fos = c.arac === 'fosforlu';
+    const kontur = getStroke(c.noktalar, {
+      size: c.kalinlik * (fos ? 1 : 2.2), thinning: fos ? 0 : 0.55, smoothing: 0.6, streamline: fos ? 0.6 : 0.45,
+      simulatePressure: !!c.basincYok, last: c !== aktifCizgi,
+      start: { cap: !fos }, end: { cap: !fos },
+    });
+    if (!kontur.length) return '';
+    let d = `M${kontur[0][0].toFixed(1)} ${kontur[0][1].toFixed(1)}Q`;
+    for (let i = 0; i < kontur.length; i++) {
+      const [x0, y0] = kontur[i], [x1, y1] = kontur[(i + 1) % kontur.length];
+      d += `${x0.toFixed(1)} ${y0.toFixed(1)} ${((x0 + x1) / 2).toFixed(1)} ${((y0 + y1) / 2).toFixed(1)} `;
     }
-    const son = p[p.length - 1];
-    return d + `L${son[0]} ${son[1]}`;
+    return d + 'Z';
   }
   function yolEl(c) {
-    const noktalar = c.noktalar.map((p) => piksel(c, p)).filter(Boolean);
-    if (!noktalar.length) return null;
+    if (!c.noktalar || !c.noktalar.length) return null;
     const t = document.createElementNS(SVG, 'path');
-    t.setAttribute('d', yolda(noktalar));
+    t.setAttribute('d', sekil(c));
     t.setAttribute('class', c.arac === 'fosforlu' ? 'fosforlu' : 'kalem');
-    t.style.stroke = renkDeger(c.renk);
-    t.style.strokeWidth = c.kalinlik;
+    t.style.fill = renkDeger(c.renk);
     t.dataset.id = c.id;
     return t;
   }
@@ -554,14 +586,10 @@ function kalemKatmani(partId, yuzey) {
 
   /* Araç çubuğu */
   const cubuk = el('div', { class: 'arac', role: 'toolbar', 'aria-label': 'Çizim araçları' });
-  const kaydetBar = el('div', { class: 'arac kaydet-bar', hidden: true },
-    el('span', {}, 'Çizimler kaydedilsin mi?'),
-    el('button', { class: 'vazgec-d', onclick: () => vazgec() }, 'Vazgeç'),
-    el('button', { class: 'kaydet-d', onclick: () => kaydet() }, 'Kaydet'));
   function cubukCiz() {
     const dugmeler = [];
     for (const [ad, yazi, i] of [['kalem', 'Kalem', IKON.kalem], ['fosforlu', 'Fosforlu kalem', IKON.fosforlu], ['silgi', 'Silgi', IKON.silgi]]) {
-      dugmeler.push(el('button', { 'aria-label': yazi, 'aria-pressed': String(arac === ad), html: ikon(i), onclick: () => { arac = ad; cubukCiz(); } }));
+      dugmeler.push(el('button', { 'aria-label': yazi, 'aria-pressed': String(arac === ad), html: ikon(i), onclick: () => { arac = ad; pencilSilgi = false; cubukCiz(); } }));
     }
     if (arac !== 'silgi') {
       dugmeler.push(el('span', { class: 'ayirac' }));
@@ -572,12 +600,13 @@ function kalemKatmani(partId, yuzey) {
     }
     dugmeler.push(el('span', { class: 'ayirac' }),
       el('button', { 'aria-label': 'Geri al', html: ikon(IKON.geri), onclick: () => geriAl() }));
+    // Kaydet/Vazgeç ayrı bir çubuk değil, aynı çubuğun sonunda (2026-10-30: ayrı çubuk Önceki/Sonraki'yi örtüyordu).
+    if (taslakVar()) dugmeler.push(el('span', { class: 'ayirac' }),
+      el('button', { class: 'vazgec-d', onclick: () => vazgec() }, 'Vazgeç'),
+      el('button', { class: 'kaydet-d', onclick: () => kaydet() }, 'Kaydet'));
     cubuk.replaceChildren(...dugmeler);
-    kaydetBar.hidden = !taslakVar();
-    // Kayıt çubuğu görünürken sayfanın en altındaki Önceki/Sonraki düğmelerinin üstünü kapatmasın.
-    document.body.classList.toggle('taslak-var', taslakVar());
   }
-  document.body.append(kaydetBar, cubuk);
+  document.body.append(cubuk);
   cubukCiz(); ciz();
   const yenileFn = (anahtar) => { if (anahtar === partId) { veri = Depo.cizim(partId); ciz(); cubukCiz(); } };   // başka cihazdan gelen çizim
   Esle.yenile = yenileFn;
@@ -598,29 +627,16 @@ function kalemKatmani(partId, yuzey) {
   function vazgec() { veri.taslak = []; veri.silinen = []; kaydetAyar(); ciz(); cubukCiz(); }
 
   /* Çizim girdisi: yalnız kalem (ya da ?fare ile fare). Parmak kaydırır. */
-  function capaNokta(e) {   // olay anında: öğe çapası + çapaya bağıl normalize konum
-    const t = e.target.closest ? e.target.closest(CAPA_SELC) : null;
-    const a = t || yuzey;
-    const yr = yuzey.getBoundingClientRect(), r = a.getBoundingClientRect();
-    const w = Math.max(r.width, 1), h = Math.max(r.height, 1);
-    return {
-      onak: a.getAttribute('data-ciz-onak') || 'y',
-      ax: (e.clientX - r.left) / w,
-      ay: (e.clientY - r.top) / h,
-    };
-  }
-  function nokta(e, c) {   // çapaya bağıl normalize nokta (0..1 öğe kutusu)
-    const r = kutu(c);
-    if (!r) return [0, 0];
-    const yr = yuzey.getBoundingClientRect();
-    return [(e.clientX - yr.left - r.x) / r.w, (e.clientY - yr.top - r.y) / r.h];
+  function nokta(e) {   // kâğıt pikseli + basınç
+    const kr = kagit.getBoundingClientRect();
+    const p = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5;
+    return [Math.round((e.clientX - kr.left) / olcek * 10) / 10, Math.round((e.clientY - kr.top) / olcek * 10) / 10, Math.round(p * 100) / 100];
   }
   const cizebilir = (e) => (e.isPrimary !== false) && (e.pointerType === 'pen' || (fareIle && e.pointerType === 'mouse'));
   function siliciGec(e) {
-    const yr = yuzey.getBoundingClientRect();
-    const x = e.clientX - yr.left, y = e.clientY - yr.top;
+    const [x, y] = nokta(e);
     const silinen = new Set(veri.silinen);
-    const deg = (c) => c.noktalar.some((p) => { const q = piksel(c, p); return q && Math.hypot(q[0] - x, q[1] - y) < SILGI_YARI_CAP; });
+    const deg = (c) => c.noktalar.some((p) => Math.hypot(p[0] - x, p[1] - y) < SILGI_YARI_CAP + c.kalinlik);
     veri.taslak = veri.taslak.filter((c) => !deg(c));
     for (const c of veri.kaydedilen) if (!silinen.has(c.id) && deg(c)) veri.silinen.push(c.id);
     ciz();
@@ -632,21 +648,18 @@ function kalemKatmani(partId, yuzey) {
     e.preventDefault();
     try { yuzey.setPointerCapture(e.pointerId); } catch {}
     if (arac === 'silgi') { aktifCizgi = 'silgi'; siliciGec(e); return; }
-    const cap = capaNokta(e);
-    aktifCizgi = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), arac, renk: renk[arac], kalinlik: KALINLIK[arac],
-      onak: cap.onak, ax: cap.ax, ay: cap.ay, noktalar: [[0, 0]] };
-    aktifCizgi.noktalar[0] = nokta(e, aktifCizgi);
+    aktifCizgi = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), k: CIZGI_SURUM, arac, renk: renk[arac], kalinlik: KALINLIK[arac],
+      basincYok: e.pointerType !== 'pen' || undefined, noktalar: [nokta(e)] };
     veri.taslak.push(aktifCizgi); ciz();
     aktifYol = katman.querySelector(`[data-id="${aktifCizgi.id}"]`);
   }
   // Kalem hareketinde yalnız çizilen çizgi güncellenir; tüm çizgileri her harekette baştan kurmak
   // çizgi sayısı arttıkça gecikme yapıyordu (2026-10-30 denetimi).
   function aktifGuncelle() {
-    // Boyut değişimi (ResizeObserver → ciz) çizgi sürerken yolları yeniden kurmuş olabilir.
+    // Boyut değişimi çizgi sürerken yolları yeniden kurmuş olabilir.
     if (!aktifYol || !aktifYol.isConnected) aktifYol = katman.querySelector(`[data-id="${aktifCizgi.id}"]`);
     if (!aktifYol) { ciz(); return; }
-    const noktalar = aktifCizgi.noktalar.map((p) => piksel(aktifCizgi, p)).filter(Boolean);
-    aktifYol.setAttribute('d', yolda(noktalar));
+    aktifYol.setAttribute('d', sekil(aktifCizgi));
   }
   function hareket(e) {
     if (!aktifCizgi || !cizebilir(e)) return;
@@ -655,28 +668,35 @@ function kalemKatmani(partId, yuzey) {
     try { olaylar = e.getCoalescedEvents ? e.getCoalescedEvents() : []; } catch { olaylar = []; }
     if (!olaylar.length) olaylar = [e];
     if (aktifCizgi === 'silgi') { olaylar.forEach(siliciGec); return; }
-    for (const o of olaylar) aktifCizgi.noktalar.push(nokta(o, aktifCizgi));
+    for (const o of olaylar) aktifCizgi.noktalar.push(nokta(o));
     aktifGuncelle();
   }
-  function bitis(e) {
+  function bitis() {
     if (!aktifCizgi) return;
-    const fosforlu = aktifCizgi !== 'silgi' && aktifCizgi.arac === 'fosforlu';
+    const biten = aktifCizgi;
     aktifCizgi = null; aktifYol = null; kaydetAyar(); cubukCiz();
-    if (fosforlu) ciz();
+    if (biten !== 'silgi') ciz();   // son hâl: uç kapanışı (last: true) ile yeniden şekillenir
   }
   yuzey.addEventListener('pointerdown', basla);
   yuzey.addEventListener('pointermove', hareket);
   yuzey.addEventListener('pointerup', bitis);
-  yuzey.addEventListener('pointercancel', bitis);
-  // Kalem dokunuşları sayfayı kaydırmasın; parmak kaydırmaya devam etsin
-  const kalemTouch = (e) => { const t = e.touches[0]; if (t && t.touchType === 'stylus') e.preventDefault(); };
+  // Tanı: çizgi iptal olursa (iPad kaydırmaya geçti, avuç vb.) kalem açısıyla kaydet (Ayarlar → Tanı kaydı).
+  const iptal = (e) => {
+    if (aktifCizgi && aktifCizgi !== 'silgi') Tani.yaz('kalem iptal', { tur: e.pointerType, yukseklikAcisi: e.altitudeAngle != null ? Math.round(e.altitudeAngle * 57.3) + '°' : '?', nokta: aktifCizgi.noktalar.length });
+    bitis();
+  };
+  yuzey.addEventListener('pointercancel', iptal);
+  // Kalem dokunuşları sayfayı kaydırmasın; parmak kaydırmaya devam etsin.
+  // Eğik tutulan kalemde avuç çoğu zaman ekrana önce değer: touches[0] avuç olur ve kalem sayfayı
+  // kaydırmaya başlar (pointercancel → çizgi kopar). Bu yüzden dokunuşların HERHANGİ biri kalemse engelle.
+  const kalemTouch = (e) => { if ([...e.touches].some((t) => t.touchType === 'stylus')) e.preventDefault(); };
   yuzey.addEventListener('touchstart', kalemTouch, { passive: false });
   yuzey.addEventListener('touchmove', kalemTouch, { passive: false });
 
-  /* Apple Pencil Pro çift dokunuş (yerli katmandan 'pencilCiftDokun' olayı) → silgi */
+  /* Apple Pencil çift dokunuş / Pro sıkıştırma (yerli katmandan 'pencilCiftDokun' olayı) → silgi */
   let pencilSilgi = false;
   const pencilCb = () => {
-    if (aktifCizgi === 'silgi' || arac === 'silgi') { arac = 'kalem'; pencilSilgi = false; }
+    if (arac === 'silgi') { arac = 'kalem'; pencilSilgi = false; }
     else { arac = 'silgi'; pencilSilgi = true; }
     cubukCiz();
     const i = $('#arac-bilgi'); if (i) { i.textContent = arac === 'silgi' ? 'Silgi' : 'Kalem'; clearTimeout(i._t); i._t = setTimeout(() => { i.textContent = ''; }, 1600); }
@@ -717,14 +737,13 @@ function kalemKatmani(partId, yuzey) {
       yuzey.removeEventListener('pointerdown', basla);
       yuzey.removeEventListener('pointermove', hareket);
       yuzey.removeEventListener('pointerup', bitis);
-      yuzey.removeEventListener('pointercancel', bitis);
+      yuzey.removeEventListener('pointercancel', iptal);
       yuzey.removeEventListener('touchstart', kalemTouch, { passive: false });
       yuzey.removeEventListener('touchmove', kalemTouch, { passive: false });
       svg.remove(); zemin.remove();
       ro.disconnect(); removeEventListener('orientationchange', don); removeEventListener('pencilCiftDokun', pencilCb);
       removeEventListener('pointerup', kalemBitti); removeEventListener('pointercancel', kalemBitti);
-      cubuk.remove(); kaydetBar.remove(); bilgi.remove();
-      document.body.classList.remove('taslak-var');
+      cubuk.remove(); bilgi.remove();
       if (Esle.yenile === yenileFn) Esle.yenile = null;
     },
   };
