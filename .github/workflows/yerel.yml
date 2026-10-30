@@ -1,0 +1,60 @@
+name: Yerel
+run-name: Yerel Defter derlemesi
+on:
+  workflow_dispatch:
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode ve araçlar
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          xcodebuild -version
+          brew install xcodegen
+      - name: Proje üret
+        working-directory: yerel
+        run: xcodegen generate
+      - name: Simülatörde test ve ekran görüntüleri
+        working-directory: yerel
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          adaylar=[(k,x) for k,v in d.items() if 'iOS' in k for x in v if 'iPad Pro' in x['name'] and '13-inch' in x['name']]
+          adaylar=adaylar or [(k,x) for k,v in d.items() if 'iOS' in k for x in v if 'iPad' in x['name']]
+          adaylar.sort(key=lambda a: a[0])
+          print(adaylar[-1][1]['udid'])")
+          echo "Simülatör: $UDID"
+          xcodebuild test -project Defter.xcodeproj -scheme Defter -destination "id=$UDID" -resultBundlePath ../sonuc.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../test.log | grep -E "error:|warning: unre|Test Case|\*\* TEST|failed|passed" | head -200
+      - name: Ekran görüntülerini çıkar
+        if: always()
+        run: |
+          mkdir -p ekran
+          xcrun xcresulttool export attachments --path sonuc.xcresult --output-path ekran || true
+          ls ekran | head -50
+          grep -E "error:" test.log | head -60 > ekran/derleme-hatalari.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ekran-goruntuleri
+          path: |
+            ekran
+            test.log
+      - name: İmzasız derle (cihaz)
+        working-directory: yerel
+        run: |
+          set -o pipefail
+          xcodebuild -project Defter.xcodeproj -scheme Defter -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | grep -E "error:|BUILD" | head -100
+      - name: IPA paketle (iLoader / SideStore imzalar)
+        working-directory: yerel
+        run: |
+          mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/Defter.app Payload/
+          zip -qr ../Defter-yerel.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: defter-yerel-ios
+          path: Defter-yerel.ipa
