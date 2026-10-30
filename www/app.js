@@ -263,6 +263,9 @@ function taniKutusu() {
     el('button', { class: 'ikincil', onclick: () => { Depo.yaz('tani', []); ayarEkrani(); } }, 'Kaydı temizle'));
 }
 
+const cubukEl = (biten, toplam) => el('span', { class: 'kutu-ilerleme', 'aria-label': `${biten} / ${toplam} part bitti` },
+  el('i', {}, el('s', { style: `width:${toplam ? biten / toplam * 100 : 0}%` })), el('b', {}, `${biten}/${toplam}`));
+
 /* ---------- Ana ekran: kitaplar (iç içe kütüphanenin ilk katmanı) ---------- */
 async function anaEkran() {
   const plan = await json('icerik/plan.json');
@@ -284,13 +287,20 @@ async function anaEkran() {
       el('span', { html: ikon(IKON.sag, 26) })));
   }
 
+  // Kitaplık: her kitap bir kutucuk (Kağan 2026-10-30: önce kitaplar, sonra bölümler, sonra partlar)
+  kok.append(el('h2', { class: 'raf-baslik' }, 'Kitaplar'));
+  const raf = el('div', { class: 'raf' });
   for (const ders of plan.dersler) {
     const partlar = ders.bolumler.flatMap((b) => b.partlar);
     const biten = partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
-    kok.append(el('button', { class: 'kitap', onclick: () => (location.hash = '#/kitap/' + ders.id) },
-      el('span', {}, el('h2', {}, ders.baslik), el('p', {}, `${ders.bolumler.length} bölüm · ${partlar.length} part${ders.kaynak ? ' · ' + ders.kaynak : ''}`)),
-      el('span', { class: 'ozet' }, `${biten}/${partlar.length}`, el('i', { class: 'ok', html: ikon(IKON.sag, 22) }))));
+    raf.append(el('button', { class: 'kutu kitap-kutu', onclick: () => (location.hash = '#/kitap/' + ders.id) },
+      el('span', { class: 'sirt' }),
+      el('h3', {}, ders.baslik),
+      ders.kaynak ? el('p', { class: 'kaynak' }, ders.kaynak) : null,
+      el('p', { class: 'say' }, `${ders.bolumler.length} bölüm · ${partlar.length} part`),
+      cubukEl(biten, partlar.length)));
   }
+  kok.append(raf);
   kok.append(el('p', { class: 'sonra' }, 'Yeni kitaplar hazır oldukça buraya eklenecek.'));
   uygulama.replaceChildren(kok);
   document.title = 'Defter';
@@ -306,12 +316,16 @@ async function kitapEkrani(kitapId) {
     el('button', { class: 'ust-geri', onclick: () => (location.hash = '#/') }, el('span', { html: ikon(IKON.sol, 20) }), 'Kitaplar'),
     el('h1', {}, ders.baslik),
     ders.kaynak ? el('p', { class: 'alt' }, 'Kaynak: ' + ders.kaynak) : null);
+  const raf = el('div', { class: 'raf' });
   for (const bolum of ders.bolumler) {
     const biten = bolum.partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
-    kok.append(el('button', { class: 'kitap', onclick: () => (location.hash = `#/bolum/${ders.id}/${bolum.no}`) },
-      el('span', {}, el('h2', {}, `Bölüm ${bolum.no}: ${bolum.baslik}`), el('p', {}, `${bolum.partlar.length} part`)),
-      el('span', { class: 'ozet' }, `${biten}/${bolum.partlar.length}`, el('i', { class: 'ok', html: ikon(IKON.sag, 22) }))));
+    raf.append(el('button', { class: 'kutu bolum-kutu', onclick: () => (location.hash = `#/bolum/${ders.id}/${bolum.no}`) },
+      el('span', { class: 'no' }, String(bolum.no)),
+      el('h3', {}, bolum.baslik),
+      el('p', { class: 'say' }, `${bolum.partlar.length} part`),
+      cubukEl(biten, bolum.partlar.length)));
   }
+  kok.append(raf);
   uygulama.replaceChildren(kok);
   document.title = ders.baslik + ' — Defter';
 }
@@ -327,7 +341,7 @@ async function bolumEkrani(kitapId, bolumNo) {
     el('button', { class: 'ust-geri', onclick: () => (location.hash = '#/kitap/' + ders.id) }, el('span', { html: ikon(IKON.sol, 20) }), ders.baslik),
     el('h1', {}, `Bölüm ${bolum.no}: ${bolum.baslik}`));
   const bitenler = bolum.partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
-  kok.append(el('p', { class: 'alt' }, `${bitenler} / ${bolum.partlar.length} part bitti`));
+  kok.append(el('div', { class: 'bolum-ozet' }, cubukEl(bitenler, bolum.partlar.length)));
   const hat = el('ol', { class: 'hat' });
   for (const p of bolum.partlar) {
     const d = ilerleme[p.id] && ilerleme[p.id].durum;

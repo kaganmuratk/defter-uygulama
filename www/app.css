@@ -312,3 +312,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .soru-dug button { min-height: 48px; border-radius: 1rem; padding: 0 1.2rem; font: 700 1rem var(--yazi); }
 .soru-dug button.ciz { border: 1.5px solid var(--murekkep); background: none; color: inherit; }
 .soru-dug button.kaydet-d { border: 0; background: var(--arter); color: #fff; }
+
+/* ---------- Kitaplık kutucukları (2026-10-30) ---------- */
+.devam > span:last-child { margin-left: auto; display: grid; place-items: center; }
+.raf-baslik { font: 800 1.1rem/1.2 var(--yazi); color: var(--soluk); letter-spacing: .02em; margin: 0 0 .9rem; }
+.raf { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-bottom: 1.6rem; }
+.kutu {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; text-align: left; min-height: 11rem;
+  background: var(--yuzey); border: 1px solid var(--cizgi); border-radius: 1.3rem; padding: 1.3rem 1.3rem 1.1rem; box-shadow: var(--gol);
+  transition: transform .12s; overflow: hidden;
+}
+.kutu:active { transform: scale(.985); }
+.kutu h3 { font: 800 1.3rem/1.25 var(--yazi); letter-spacing: -.02em; margin: 0 0 .3rem; }
+.kutu p { margin: 0; font-size: .95rem; line-height: 1.4; color: var(--soluk); }
+.kutu .kaynak { font-weight: 600; color: var(--murekkep); opacity: .75; }
+.kutu .say { margin-bottom: 1rem; }
+.kitap-kutu { padding-left: 2rem; min-height: 13rem; }
+.kitap-kutu .sirt { position: absolute; left: 0; top: 0; bottom: 0; width: .65rem; background: var(--arter); }
+.bolum-kutu .no { font: 800 2.4rem/1 var(--yazi); color: var(--arter); margin-bottom: .6rem; letter-spacing: -.03em; }
+.kutu-ilerleme { margin-top: auto; width: 100%; display: flex; align-items: center; gap: .7rem; }
+.kutu-ilerleme i { flex: 1; height: 6px; border-radius: 3px; background: var(--yuzey2); position: relative; overflow: hidden; }
+.kutu-ilerleme s { display: block; height: 100%; background: var(--arter); border-radius: 3px; }
+.kutu-ilerleme b { font-size: .9rem; color: var(--soluk); font-weight: 700; }
+.bolum-ozet { margin: 0 0 1.8rem; max-width: 24rem; }
+.bolum-ozet .kutu-ilerleme { margin: 0; }
+.ust-geri { display: inline-flex; align-items: center; gap: .2rem; background: none; border: 0; padding: .6rem .6rem .6rem 0; min-height: 44px; color: var(--ven); font: 700 1.05rem/1 var(--yazi); }
+.ust-geri svg { width: 20px; height: 20px; }
