@@ -590,6 +590,11 @@ const KISA_KENAR = Math.min(screen.width, screen.height);
 const KAGIT_GENISLIK = KISA_KENAR < 600 ? 400 : 800;
 const KAGIT_EN_BUYUK = 1.35;   // geniş yatay ekranda yazı aşırı büyümesin
 function kagitOlcegi(genislik) { return Math.min(Math.max(genislik, 200) / KAGIT_GENISLIK, KAGIT_EN_BUYUK); }
+// İki parmakla yakınlaştırma YALNIZ okuma sayfasında (Kağan 2026-10-30: "uygulamanın her yerinde olmasın").
+// Tarayıcının kendi yakınlaştırması index.html'de ve CSS'te (touch-action) her yerde kapalı.
+// Çizimler kâğıt pikselinde olduğu için yakınlaştırınca yazıyla birlikte büyür, yeri değişmez.
+const YAKIN_EN_AZ = 1, YAKIN_EN_COK = 3;
+let yakinlik = 1;   // part'lar arasında korunur
 // Kısa sayfada da Önceki/Sonraki en altta: kâğıdın en az yüksekliği dikey ekrandan hesaplanır ve
 // döndürmede DEĞİŞMEZ (yoksa altta boşluğa yazılan not yatayda düğmelerin altında kalırdı).
 // 240 px: üst çubuk, sayfa boşlukları ve alttaki araç çubuğu payı (dikeyde düğmeler kaydırmadan görünsün).
@@ -621,10 +626,38 @@ function kalemKatmani(partId, yuzey, kagit) {
   function yerlestir() {
     const stil = getComputedStyle(yuzey);
     const genislik = yuzey.clientWidth - parseFloat(stil.paddingLeft) - parseFloat(stil.paddingRight);
-    olcek = kagitOlcegi(genislik);
-    kagit.style.transform = `translateX(-50%) scale(${olcek})`;
+    olcek = kagitOlcegi(genislik) * yakinlik;
+    const en = KAGIT_GENISLIK * olcek;
+    // Yakınlaşınca kâğıt ekrandan geniş olur: sahne o kadar genişler ve sayfa yatay kaydırılabilir
+    sahne.style.width = Math.max(en, genislik) + 'px';
+    kagit.style.transform = `translateX(${Math.max(0, (genislik - en) / 2)}px) scale(${olcek})`;
     sahne.style.height = (kagit.offsetHeight * olcek) + 'px';
+    yuzey.classList.toggle('yakin', yakinlik > 1.001);
   }
+  // İki parmak: kıstırma hareketi. Parmakların ortasındaki nokta yerinde kalacak şekilde ölçeklenir.
+  let kistir = null;
+  const iki = (e) => [...e.touches].filter((t) => t.touchType !== 'stylus');
+  const kistirBasla = (e) => {
+    const t = iki(e); if (t.length !== 2) return;
+    kistir = { mesafe: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), yakinlik };
+  };
+  const kistirHareket = (e) => {
+    const t = iki(e); if (!kistir || t.length !== 2) return;
+    e.preventDefault();
+    const mx = (t[0].clientX + t[1].clientX) / 2, my = (t[0].clientY + t[1].clientY) / 2;
+    const kr = kagit.getBoundingClientRect(), px = (mx - kr.left) / olcek, py = (my - kr.top) / olcek;   // kâğıt noktası
+    const m = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    yakinlik = Math.min(YAKIN_EN_COK, Math.max(YAKIN_EN_AZ, kistir.yakinlik * m / kistir.mesafe));
+    yerlestir();
+    const yeni = kagit.getBoundingClientRect();
+    yuzey.scrollLeft += yeni.left + px * olcek - mx;
+    window.scrollBy(0, yeni.top + py * olcek - my);
+  };
+  const kistirBitir = (e) => { if (iki(e).length < 2) kistir = null; };
+  yuzey.addEventListener('touchstart', kistirBasla, { passive: true });
+  yuzey.addEventListener('touchmove', kistirHareket, { passive: false });
+  yuzey.addEventListener('touchend', kistirBitir);
+  yuzey.addEventListener('touchcancel', kistirBitir);
   kagit.style.width = KAGIT_GENISLIK + 'px';
   kagit.style.minHeight = KAGIT_EN_AZ + 'px';
   if (KAGIT_GENISLIK < 800) kagit.classList.add('dar');
@@ -967,6 +1000,10 @@ function kalemKatmani(partId, yuzey, kagit) {
       yuzey.removeEventListener('pointercancel', iptal);
       yuzey.removeEventListener('touchstart', kalemTouch, { passive: false });
       yuzey.removeEventListener('touchmove', kalemTouch, { passive: false });
+      yuzey.removeEventListener('touchstart', kistirBasla, { passive: true });
+      yuzey.removeEventListener('touchmove', kistirHareket, { passive: false });
+      yuzey.removeEventListener('touchend', kistirBitir);
+      yuzey.removeEventListener('touchcancel', kistirBitir);
       svg.remove(); zemin.remove();
       ro.disconnect(); removeEventListener('orientationchange', don); removeEventListener('pencilCiftDokun', pencilCb);
       removeEventListener('pointerup', kalemBitti); removeEventListener('pointercancel', kalemBitti);

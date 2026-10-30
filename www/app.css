@@ -33,7 +33,7 @@
   }
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }   /* çift dokunuşla tarayıcı yakınlaştırması yok */
 body {
   margin: 0; background: var(--kemik); color: var(--murekkep);
   font: 400 1.1875rem/1.7 var(--yazi); letter-spacing: .002em;
@@ -139,7 +139,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
    ekrana transform: scale ile sığdırılır. Yazı boyutu SABİT (ekran boyutuna göre değişmez) ki yazı
    dikey/yatayda aynı dizilsin ve çizimler kaymasın. */
 .sahne { position: relative; width: 100%; }
-.kagit { position: absolute; top: 0; left: 50%; transform-origin: top center; display: flex; flex-direction: column; font-size: 21px; line-height: 1.7; }
+.kagit { position: absolute; top: 0; left: 0; transform-origin: top left; display: flex; flex-direction: column; font-size: 21px; line-height: 1.7; }
 .kagit.dar { font-size: 18px; }
 .kagit > .metin { width: 100%; }
 .kagit h1 { font: 800 2.55em/1.12 var(--yazi); }
@@ -346,3 +346,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .arac .kalinlik[aria-pressed="true"] { background: var(--yuzey2); }
 .arac .kalinlik[aria-pressed="true"] i { box-shadow: 0 0 0 3px var(--ven-acik); }
 .arac button.yazili { width: auto; padding: 0 .8rem; border-radius: 1.1rem; font: 700 .9rem var(--yazi); }
+
+/* İki parmakla yakınlaştırma yalnız okuma sayfasında (app.js); tarayıcının kendi kıstırması her yerde kapalı */
+body { touch-action: pan-x pan-y; }
+.sayfa { touch-action: pan-x pan-y; }
+.sayfa.yakin { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sahne { margin: 0; }
