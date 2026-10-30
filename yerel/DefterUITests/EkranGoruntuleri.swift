@@ -26,9 +26,12 @@ final class EkranGoruntuleri: XCTestCase {
         sleep(1)
         cek("02-kutuphane-yatay")
         XCUIDevice.shared.orientation = .portrait
-        sleep(1)
+        sleep(2)
 
-        app.buttons["kitap-fizyoloji"].firstMatch.tap()
+        let kitap = app.buttons["kitap-fizyoloji"].firstMatch
+        XCTAssertTrue(kitap.waitForExistence(timeout: 5))
+        kitap.tap()
+        if !app.buttons["bolum-1"].waitForExistence(timeout: 3) { kitap.tap() }
         XCTAssertTrue(app.buttons["bolum-1"].waitForExistence(timeout: 5))
         cek("03-kitap-bolumler")
         app.buttons["bolum-1"].tap()

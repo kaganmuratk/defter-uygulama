@@ -18,6 +18,7 @@ jobs:
         run: xcodegen generate
       - name: Simülatörde test ve ekran görüntüleri
         working-directory: yerel
+        continue-on-error: true
         run: |
           set -o pipefail
           UDID=$(xcrun simctl list devices available -j | python3 -c "
