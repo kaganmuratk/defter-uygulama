@@ -20,7 +20,7 @@ final class EkranGoruntuleri: XCTestCase {
     func testGezinti() throws {
         XCUIDevice.shared.orientation = .portrait
         app.launch()
-        XCTAssertTrue(app.staticTexts["Kitaplar"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["devam"].waitForExistence(timeout: 15))
         cek("01-kutuphane-dikey")
         XCUIDevice.shared.orientation = .landscapeLeft
         sleep(1)

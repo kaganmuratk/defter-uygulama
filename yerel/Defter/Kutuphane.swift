@@ -11,7 +11,7 @@ struct KutuphaneEkrani: View {
     var body: some View {
         NavigationStack {
             GeometryReader { g in
-                let genis = g.size.width > 900
+                let genis = g.size.width > 900 && g.size.width > g.size.height   // yatayda iki sütun, dikeyde tek sütun
                 ScrollView {
                     Group {
                         if genis {
