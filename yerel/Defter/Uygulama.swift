@@ -21,15 +21,6 @@ struct DefterUygulamasi: App {
     }
 }
 
-enum Tema {
-    static let vurguUI = UIColor(onaltilik: "4f5bd5")
-    static let vurgu = Color(vurguUI)
-    static let zeminUI = UIColor { $0.userInterfaceStyle == .dark ? UIColor(onaltilik: "101014") : UIColor(onaltilik: "f6f6f8") }
-    static let masaUI = UIColor { $0.userInterfaceStyle == .dark ? UIColor(onaltilik: "1a1a20") : UIColor(onaltilik: "e9e9ee") }
-    static let zemin = Color(zeminUI)
-    static let kart = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(onaltilik: "1c1c22") : .white })
-}
-
 struct KokEkran: View {
     @EnvironmentObject var icerik: IcerikYonetici
     var body: some View {

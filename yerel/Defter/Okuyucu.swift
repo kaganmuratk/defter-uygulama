@@ -27,6 +27,10 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private var paletAcik = true
     private var taslakIsi: DispatchWorkItem?
     private let kendiGeriAlma = UndoManager()
+    private let panel = PanelModeli()
+    private lazy var panelKontrol = UIHostingController(rootView: OkuyucuPaneli(model: panel))
+    private var panelGenislik: NSLayoutConstraint?
+    private var panelAcik = false
     override var undoManager: UndoManager? { kendiGeriAlma }
 
     // Pencil: çift dokunuş/sıkıştırma ile silgiye geçilmişse kalem ekrandan kalkınca önceki araca dön (Kağan'ın istediği davranış)
@@ -48,7 +52,11 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         super.viewDidLoad()
         view.backgroundColor = Tema.zeminUI
         kurUstCubuk()
+        kurPanel()
         kurPdf()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (k: OkuyucuKontrol, _: UITraitCollection) in
+            k.pdfView.backgroundColor = Tema.noktaliDesen(stil: k.traitCollection.userInterfaceStyle)
+        }
         view.addSubview(paletSahibi)
         yukleniyor.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(yukleniyor)
@@ -87,6 +95,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         for ek in kayit.ekSayfalar { ekSayfaYerlestir(ek, belge: doc) }
         pdfView.document = doc
         yukleniyor.stopAnimating()
+        paneliGuncelle()
         DispatchQueue.main.async { [weak self] in self?.olcekleriAyarla(); self?.kaldigiYereGit() }
     }
 
@@ -110,6 +119,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let sayfa = pdfView.currentPage
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
             guard let self else { return }
+            self.paneliDegistir(size.width > 1000, animasyon: false)
             let sigdir = self.pdfView.scaleFactorForSizeToFit
             self.pdfView.minScaleFactor = sigdir * 0.5
             self.pdfView.maxScaleFactor = sigdir * 5
@@ -118,13 +128,71 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         }
     }
 
+    // MARK: Yan panel (içindekiler + notlar)
+    private func kurPanel() {
+        addChild(panelKontrol)
+        let v = panelKontrol.view!
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.backgroundColor = Tema.zeminUI
+        view.addSubview(v)
+        panelKontrol.didMove(toParent: self)
+        panelGenislik = v.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            v.topAnchor.constraint(equalTo: ustCubuk.bottomAnchor),
+            v.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            v.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            panelGenislik!,
+        ])
+        v.clipsToBounds = true
+        panel.baslik = part.baslik
+        panel.ust = "Part \(part.no)\(part.kitap.map { " · " + $0 } ?? "")"
+        panel.git = { [weak self] anahtar in self?.sayfayaGit(anahtar) }
+        panel.notAc = { [weak self] id in
+            guard let self, let n = self.kayit.notlar.first(where: { $0.id == id }) else { return }
+            self.sayfayaGit(n.sayfa); self.notuAc(id)
+        }
+    }
+    private func paneliDegistir(_ acik: Bool, animasyon: Bool = true) {
+        panelAcik = acik
+        panelGenislik?.constant = acik ? 300 : 0
+        let sayfa = pdfView.currentPage
+        let degistir = { self.view.layoutIfNeeded() }
+        if animasyon { UIView.animate(withDuration: 0.25, animations: degistir) { _ in self.olcekleriAyarla(); if let s = sayfa { self.pdfView.go(to: s) } } }
+        else { degistir(); olcekleriAyarla() }
+    }
+    private func paneliGuncelle() {
+        guard let doc = pdfView.document else { return }
+        var satirlar: [PanelModeli.Satir] = []
+        for i in 0..<doc.pageCount {
+            guard let p = doc.page(at: i), let a = anahtarlar[ObjectIdentifier(p)] else { continue }
+            let b = sayfalar.first(where: { $0.anahtar == a })
+            let tur = String(a.prefix(1))
+            satirlar.append(.init(id: a, baslik: b?.baslik ?? "Not sayfası", tur: tur, no: tur == "b" ? (b?.bolumSira).map { $0 + 1 } : nil))
+        }
+        panel.satirlar = satirlar
+        panel.notlar = kayit.notlar
+    }
+    private func sayfayaGit(_ anahtar: String) {
+        guard let doc = pdfView.document else { return }
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == anahtar { pdfView.go(to: p); return } }
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // İlk yerleşimde: geniş ekranda (yatay iPad) panel açık gelir
+        if !panelIlkKarar, view.bounds.width > 0 {
+            panelIlkKarar = true
+            paneliDegistir(view.bounds.width > 1000, animasyon: false)
+        }
+    }
+    private var panelIlkKarar = false
+
     // MARK: PDF görünümü
     private func kurPdf() {
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(pdfView, belowSubview: ustCubuk)
         NSLayoutConstraint.activate([
             pdfView.topAnchor.constraint(equalTo: ustCubuk.bottomAnchor),
-            pdfView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            pdfView.leadingAnchor.constraint(equalTo: panelKontrol.view.trailingAnchor),
             pdfView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             pdfView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
@@ -133,7 +201,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         pdfView.displaysPageBreaks = true
         pdfView.pageBreakMargins = UIEdgeInsets(top: 14, left: 24, bottom: 14, right: 24)
         pdfView.autoScales = false
-        pdfView.backgroundColor = Tema.masaUI
+        pdfView.backgroundColor = Tema.noktaliDesen(stil: traitCollection.userInterfaceStyle)
         pdfView.pageShadowsEnabled = true
         pdfView.pageOverlayViewProvider = self
         pdfView.isInMarkupMode = true
@@ -223,8 +291,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // MARK: İlerleme
     @objc private func sayfaDegisti() {
-        guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)],
-              let b = sayfalar.first(where: { $0.anahtar == anahtar }), let sira = b.bolumSira else { return }
+        guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
+        panel.secili = anahtar
+        guard let b = sayfalar.first(where: { $0.anahtar == anahtar }), let sira = b.bolumSira else { return }
         IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in
             i.sayfa = sira
             var z = Set(i.ziyaret ?? []); z.insert(sira); i.ziyaret = Array(z).sorted()
@@ -234,6 +303,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // MARK: Kayıt
     private func taslakPlanla() {
+        panel.notlar = kayit.notlar
         taslakIsi?.cancel()
         let is_ = DispatchWorkItem { [weak self] in
             guard let self, !Ayar.ornek else { return }
@@ -290,7 +360,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         anahtarlar[ObjectIdentifier(s)] = "e" + ek.id
         doc.insert(s, at: doc.index(for: p) + 1)
         kayit.ekSayfalar.append(ek)
-        kirli = true; taslakPlanla()
+        kirli = true; taslakPlanla(); paneliGuncelle()
         pdfView.go(to: s)
     }
     private func sayfaSil() {
@@ -302,7 +372,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kayit.cizimler[anahtar] = nil
         kayit.notlar.removeAll { $0.sayfa == anahtar }
         doc.removePage(at: doc.index(for: p))
-        kirli = true; taslakPlanla()
+        kirli = true; taslakPlanla(); paneliGuncelle()
     }
 
     // MARK: Yapışkan notlar
@@ -369,11 +439,13 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let geri = ustDugme("Geri", sembol: "chevron.left") { [weak self] in self?.cik() }
         geri.accessibilityIdentifier = "geri"
         baslikEtiket.text = "Part \(part.no) · \(part.baslik)"
-        baslikEtiket.font = .systemFont(ofSize: 17, weight: .semibold)
-        baslikEtiket.textColor = .secondaryLabel
+        let serif = UIFont.systemFont(ofSize: 18, weight: .semibold).fontDescriptor.withDesign(.serif)
+        baslikEtiket.font = serif.map { UIFont(descriptor: $0, size: 18) } ?? .systemFont(ofSize: 18, weight: .semibold)
+        baslikEtiket.textColor = Tema.murekkepUI
         baslikEtiket.lineBreakMode = .byTruncatingTail
         baslikEtiket.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        view.tintColor = Tema.murekkepUI
         let icindekiler = UIButton(type: .system)
         icindekiler.setImage(UIImage(systemName: "list.bullet"), for: .normal)
         icindekiler.showsMenuAsPrimaryAction = true
@@ -389,6 +461,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         }])
         icindekiler.accessibilityIdentifier = "icindekiler"
 
+        let panelDugme = ikonDugme("sidebar.left", ad: "Yan panel") { [weak self] in guard let self else { return }; self.paneliDegistir(!self.panelAcik) }
         let kalem = ikonDugme("pencil.tip.crop.circle", ad: "Kalem paleti") { [weak self] in guard let self else { return }; self.paletiGoster(!self.paletAcik) }
         let geriAl = ikonDugme("arrow.uturn.backward", ad: "Geri al") { [weak self] in self?.kendiGeriAlma.undo() }
         let yinele = ikonDugme("arrow.uturn.forward", ad: "Yinele") { [weak self] in self?.kendiGeriAlma.redo() }
@@ -418,7 +491,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         }
         kirli = false
 
-        let sol = UIStackView(arrangedSubviews: [geri, baslikEtiket]); sol.spacing = 8; sol.alignment = .center
+        let sol = UIStackView(arrangedSubviews: [geri, panelDugme, baslikEtiket]); sol.spacing = 8; sol.alignment = .center
         let sag = UIStackView(arrangedSubviews: [icindekiler, sayfaMenu, not, geriAl, yinele, kalem, bitir, kaydetDugmesi]); sag.spacing = 6; sag.alignment = .center
         for v in [sol, sag] { v.translatesAutoresizingMaskIntoConstraints = false; ustCubuk.addSubview(v) }
         NSLayoutConstraint.activate([
