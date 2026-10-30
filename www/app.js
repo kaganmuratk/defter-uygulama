@@ -24,8 +24,10 @@ const Depo = {
     this.yaz('ilerleme', hepsi);
     Esle.kirli('ilerleme');
   },
-  cizim(partId) { return this.oku('cizim:' + partId, { kaydedilen: [], taslak: [], silinen: [], mezar: [] }); },
-  cizimYaz(partId, veri) { this.yaz('cizim:' + partId, veri); },
+  // Çizimler IndexedDB'de (Cizimler): localStorage ~5 MB ile sınırlı ve dolunca yazım sessizce düşüyordu
+  // (2026-10-30, Kağan: "değişikliklerde kaybolma olmasın"). Okuma bellekten, yazma bellek + IndexedDB.
+  cizim(partId) { return Cizimler.al(partId); },
+  cizimYaz(partId, veri) { Cizimler.koy(partId, veri); },
 };
 
 /* ---------- Tanı kaydı: cihazda olan hataları sonradan görmek için (Ayarlar → Tanı kaydı) ---------- */
@@ -127,9 +129,14 @@ const Icerik = {
     throw sonHata;
   },
   async json(yol) {
-    let v;
-    try { v = await (await this.ag(yol)).json(); }
-    catch (e) { if (e.yetkisiz) throw e; const eski = await this.al('json:' + yol); if (eski) return eski; throw e; }
+    // Önce cihaz: kayıtlı kopya varsa HEMEN açılır (internetsiz ya da internetsiz Wi-Fi'de 30 sn bekleme yok);
+    // güncel sürüm arka planda alınıp bir sonraki açılış için saklanır.
+    const eski = await this.al('json:' + yol);
+    if (eski) {
+      this.ag(yol, 10000, 1).then((r) => r.json()).then((v) => this.koy('json:' + yol, v)).catch(() => {});
+      return eski;
+    }
+    const v = await (await this.ag(yol)).json();
     this.koy('json:' + yol, v);   // önbelleğe yazmak beklenmez ve başarısız olsa da içerik gösterilir
     return v;
   },
@@ -138,6 +145,99 @@ const Icerik = {
     if (eski) return URL.createObjectURL(eski);
     const b = await (await this.ag(yol, 20000)).blob(); this.koy('gorsel:' + yol, b);
     return URL.createObjectURL(b);
+  },
+};
+
+/* ---------- Çizimler: bellek + IndexedDB, eski localStorage kayıtlarından göç ---------- */
+const BOS_CIZIM = () => ({ kaydedilen: [], taslak: [], silinen: [], mezar: [] });
+const Cizimler = {
+  _bellek: new Map(), _db: null,
+  db() {
+    if (!this._db) this._db = new Promise((coz, red) => {
+      const i = indexedDB.open('fz-cizim', 1);
+      i.onupgradeneeded = () => i.result.createObjectStore('cizim');
+      i.onsuccess = () => { i.result.onclose = () => { this._db = null; }; coz(i.result); };
+      i.onerror = () => red(i.error);
+    }).catch((e) => { this._db = null; throw e; });
+    return this._db;
+  },
+  async _islem(kip, is) {   // kopan bağlantıda bir kez yeniden aç (bkz. Icerik._islem)
+    for (let deneme = 0; deneme < 2; deneme++) {
+      try {
+        const db = await this.db();
+        return await new Promise((coz, red) => { const t = db.transaction('cizim', kip); is(t.objectStore('cizim'), coz, red); t.onerror = () => red(t.error); t.onabort = () => red(t.error); });
+      } catch (e) { Tani.yaz('çizim deposu', { hata: (e && (e.name + ': ' + e.message)) || String(e), deneme: deneme + 1 }); this._db = null; }
+    }
+    throw new Error('çizim deposuna yazılamadı');
+  },
+  async yukle() {   // açılışta bir kez: hepsini belleğe al, sonra localStorage'daki eski çizimleri taşı
+    try {
+      await this._islem('readonly', (st, coz) => {
+        const r = st.openCursor();
+        r.onsuccess = () => { const k = r.result; if (!k) return coz(); this._bellek.set(k.key, k.value); k.continue(); };
+      });
+    } catch { /* depo açılamadıysa göçü yapma: eski kayıtlar localStorage'da güvende kalsın */ return; }
+    const eskiler = [];
+    try { for (let i = 0; i < localStorage.length; i++) { const a = localStorage.key(i); if (a && a.startsWith('fz:cizim:')) eskiler.push(a); } } catch {}
+    for (const a of eskiler) {
+      const id = a.slice('fz:cizim:'.length);
+      let v; try { v = JSON.parse(localStorage.getItem(a)); } catch { continue; }
+      if (!v) continue;
+      const var_ = this._bellek.get(id);
+      if (var_) {   // iki tarafta da varsa çizgi kimliğiyle birleştir, hiçbir çizgi düşmesin
+        const harita = new Map([...(v.kaydedilen || []), ...(var_.kaydedilen || [])].map((c) => [c.id, c]));
+        v = { ...var_, kaydedilen: [...harita.values()], mezar: [...new Set([...(v.mezar || []), ...(var_.mezar || [])])] };
+      }
+      try { await this._yaz(id, v); this._bellek.set(id, v); localStorage.removeItem(a); }   // yalnız IndexedDB'ye yazıldıktan SONRA sil
+      catch { Tani.yaz('çizim göçü', { id }); }
+    }
+    if (eskiler.length) Tani.yaz('çizim göçü', { tasinan: eskiler.length });
+  },
+  al(id) { const v = this._bellek.get(id); return v ? structuredClone(v) : BOS_CIZIM(); },
+  koy(id, veri) {
+    const kopya = structuredClone(veri);
+    this._bellek.set(id, kopya);
+    this._yaz(id, kopya).catch(() => {
+      // Son çare: IndexedDB yazamazsa çizim kaybolmasın diye localStorage'a da dene ve haber ver
+      try { localStorage.setItem('fz:cizim:' + id, JSON.stringify(kopya)); } catch { Tani.yaz('ÇİZİM KAYDEDİLEMEDİ', { id }); }
+    });
+  },
+  _yaz(id, v) { return this._islem('readwrite', (st, coz) => { st.put(v, id).onsuccess = () => coz(); }); },
+};
+
+/* ---------- Çevrimdışı: internet olan ilk anda bütün kitabı cihaza indir ----------
+   2026-10-30 (Kağan: "internetsiz de çalışsın; internet olunca arka planda yedeklesin").
+   İçerik önce cihazdan açılır, güncellemesi arka planda kontrol edilir (stale-while-revalidate). */
+const Cevrimdisi = {
+  _calisiyor: false,
+  async indir() {
+    if (this._calisiyor || !Ayar.anahtar || navigator.onLine === false) return;
+    this._calisiyor = true;
+    try {
+      const plan = await (await Icerik.ag('plan.json')).json();
+      await Icerik.koy('json:plan.json', plan);
+      const partlar = plan.dersler.flatMap((d) => d.bolumler.flatMap((b) => b.partlar)).filter((p) => p.hazir);
+      let hazirPart = 0, gorselToplam = 0, hazirGorsel = 0;
+      for (const p of partlar) {
+        try {
+          const v = await (await Icerik.ag(p.id + '.json')).json();
+          await Icerik.koy('json:' + p.id + '.json', v); hazirPart++;
+          const html = [v.giris || '', ...(v.bolumler || []).map((b) => b.html)].join('');
+          for (const m of html.matchAll(/src="icerik\/(gorseller\/[^"]+)"/g)) {
+            gorselToplam++;
+            if (await Icerik.al('gorsel:' + m[1])) { hazirGorsel++; continue; }
+            try { const b = await (await Icerik.ag(m[1], 20000)).blob(); await Icerik.koy('gorsel:' + m[1], b); hazirGorsel++; } catch {}
+          }
+        } catch {}
+      }
+      Depo.yaz('cevrimdisi', { part: hazirPart, partToplam: partlar.length, gorsel: hazirGorsel, gorselToplam, zaman: Date.now() });
+    } catch (e) { Tani.yaz('çevrimdışı indirme', { hata: e.message }); }
+    finally { this._calisiyor = false; }
+  },
+  baslat() {
+    this.indir();
+    addEventListener('online', () => this.indir());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.indir(); });
   },
 };
 
@@ -255,6 +355,7 @@ function ayarEkrani(mesaj) {
     el('h1', {}, Ayar.anahtar ? 'Ayarlar' : 'Anahtar'),
     mesaj ? el('p', { class: 'alt hata' }, mesaj) : null,
     Ayar.anahtar ? el('p', { class: 'alt' }, durumYazi) : el('p', { class: 'alt' }, 'İçeriği indirmek için anahtarını gir. Bir kez girmen yeter.'),
+    Ayar.anahtar ? cevrimdisiYazi() : null,
     alan,
     el('button', { class: 'devam', onclick: async () => {
       if (!alan.value.trim()) return;
@@ -266,6 +367,13 @@ function ayarEkrani(mesaj) {
     Ayar.anahtar ? el('button', { class: 'ikincil', onclick: () => { location.hash = '#/'; } }, 'Geri') : null,
     taniKutusu());
   uygulama.replaceChildren(kok);
+}
+
+function cevrimdisiYazi() {
+  const c = Depo.oku('cevrimdisi', null);
+  if (!c) return el('p', { class: 'alt' }, 'Çevrimdışı kopya: henüz indirilmedi (internet olunca kendiliğinden iner).');
+  const tam = c.part === c.partToplam && c.gorsel === c.gorselToplam;
+  return el('p', { class: 'alt' }, `Çevrimdışı kopya: ${c.part}/${c.partToplam} part, ${c.gorsel}/${c.gorselToplam} görsel${tam ? ' hazır' : ''} · ${new Date(c.zaman).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`);
 }
 
 function taniKutusu() {
@@ -778,5 +886,5 @@ function kalemKatmani(partId, yuzey, kagit) {
 }
 
 /* ---------- Başlat ---------- */
-Esle.baslat();
-yonlendir();
+// Çizimler bellekte hazır olmadan sayfa açılmaz (yoksa boş çizim görünüp üzerine yazılabilirdi).
+Cizimler.yukle().finally(() => { Esle.baslat(); Cevrimdisi.baslat(); yonlendir(); });
