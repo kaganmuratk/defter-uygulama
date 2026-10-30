@@ -606,8 +606,10 @@ const RENKLER = {
   kalem: [['mürekkep', 'var(--murekkep)'], ['lacivert', '#1c7ed6'], ['yeşil', '#2f9e44'], ['turuncu', '#e8590c'], ['bordo', '#c2255c'], ['mor', '#6741d9']],
   fosforlu: [['sarı', '#f3d44a'], ['yeşil', '#8fd694'], ['pembe', '#f4a6c0'], ['turuncu', '#f9a825'], ['mavi', '#74c0fc']],
 };
-const KALINLIK = { kalem: 3.2, fosforlu: 20 };
-const SILGI_YARI_CAP = 26;   // kâğıt pikseli
+// Kalınlık seçenekleri (Kağan 2026-10-30: "kalemin kalınlığı değiştirilemiyor"); kâğıt pikseli.
+const KALINLIKLAR = { kalem: [['ince', 2.2], ['orta', 3.2], ['kalın', 5]], fosforlu: [['ince', 13], ['orta', 20], ['kalın', 28]] };
+// Silgi: 'parca' = normal silgi, yalnız üzerinden geçilen kısmı siler; 'cizgi' = dokunduğu bütün çizgiyi siler.
+const SILGI_BOYLARI = [['küçük', 8], ['büyük', 22]];   // yarıçap, kâğıt pikseli
 const CIZGI_SURUM = 3;
 
 const CAPA_SELC = 'h1,h2,h3,h4,p,li,img,blockquote,hr,table,.tablo,ol,ul,.sayfalama,.cevaplar,figure';
@@ -672,6 +674,15 @@ function kalemKatmani(partId, yuzey, kagit) {
 
   let arac = 'kalem';
   let renk = { kalem: 'mürekkep', fosforlu: 'sarı' };
+  // Kalınlık ve silgi tercihleri cihazda hatırlanır
+  const tercih = Depo.oku('kalemTercih', {});
+  const kalinlik = { kalem: tercih.kalem || 'orta', fosforlu: tercih.fosforlu || 'orta' };
+  let silgiKipi = tercih.silgiKipi || 'parca', silgiBoyu = tercih.silgiBoyu || 'küçük';
+  const tercihYaz = () => Depo.yaz('kalemTercih', { ...kalinlik, silgiKipi, silgiBoyu });
+  const kalinlikDeger = (a) => KALINLIKLAR[a].find((k) => k[0] === kalinlik[a])[1];
+  const silgiYaricap = () => SILGI_BOYLARI.find((b) => b[0] === silgiBoyu)[1];
+  // Geri al işlem yığını (oturum içi): her kalem çizgisi ya da silgi hareketi tek işlem
+  let islemler = [], silgiIslem = null;
   let aktifCizgi = null;
   let aktifYol = null;   // çizilmekte olan çizginin <path> öğesi
   const fareIle = location.search.includes('fare');
@@ -684,8 +695,12 @@ function kalemKatmani(partId, yuzey, kagit) {
   const renkDeger = (ad) => (Object.values(RENKLER).flat().find((r) => r[0] === ad) || [0, 'currentColor'])[1];
   function sekil(c) {   // perfect-freehand: çizginin dolgu çokgeni → SVG yolu
     const fos = c.arac === 'fosforlu';
+    // 2026-10-30 v0.5 (Kağan: "kesikler oluyor, pürüzsüz değil"): hafif bastırınca çizgi neredeyse sıfıra
+    // inceliyordu (thinning 0.55) ve kesik görünüyordu. İnceltme azaltıldı, basınç alt sınırla yumuşatıldı;
+    // streamline düşürüldü ki küçük el yazısı yuvarlanıp gecikmesin.
     const kontur = getStroke(c.noktalar, {
-      size: c.kalinlik * (fos ? 1 : 2.2), thinning: fos ? 0 : 0.55, smoothing: 0.6, streamline: fos ? 0.6 : 0.45,
+      size: c.kalinlik * (fos ? 1 : 2), thinning: fos ? 0 : 0.3, smoothing: 0.5, streamline: fos ? 0.5 : 0.3,
+      easing: (t) => 0.45 + 0.55 * t,
       simulatePressure: !!c.basincYok, last: c !== aktifCizgi,
       start: { cap: !fos }, end: { cap: !fos },
     });
@@ -733,6 +748,16 @@ function kalemKatmani(partId, yuzey, kagit) {
         dugmeler.push(el('button', { class: 'renk', 'aria-label': 'Renk ' + ad, 'aria-pressed': String(renk[arac] === ad),
           html: `<i style="background:${deger}"></i>`, onclick: () => { renk[arac] = ad; cubukCiz(); } }));
       }
+      dugmeler.push(el('span', { class: 'ayirac' }));
+      KALINLIKLAR[arac].forEach(([ad], i) => dugmeler.push(el('button', { class: 'kalinlik', 'aria-label': 'Kalınlık ' + ad, 'aria-pressed': String(kalinlik[arac] === ad),
+        html: `<i style="width:${6 + i * 5}px;height:${6 + i * 5}px"></i>`, onclick: () => { kalinlik[arac] = ad; tercihYaz(); cubukCiz(); } })));
+    } else {
+      dugmeler.push(el('span', { class: 'ayirac' }),
+        el('button', { class: 'yazili', 'aria-pressed': String(silgiKipi === 'parca'), onclick: () => { silgiKipi = 'parca'; tercihYaz(); cubukCiz(); } }, 'Normal'),
+        el('button', { class: 'yazili', 'aria-pressed': String(silgiKipi === 'cizgi'), onclick: () => { silgiKipi = 'cizgi'; tercihYaz(); cubukCiz(); } }, 'Tüm çizgi'),
+        el('span', { class: 'ayirac' }));
+      SILGI_BOYLARI.forEach(([ad], i) => dugmeler.push(el('button', { class: 'kalinlik', 'aria-label': 'Silgi ' + ad, 'aria-pressed': String(silgiBoyu === ad),
+        html: `<i class="halka" style="width:${10 + i * 10}px;height:${10 + i * 10}px"></i>`, onclick: () => { silgiBoyu = ad; tercihYaz(); cubukCiz(); } })));
     }
     dugmeler.push(el('span', { class: 'ayirac' }),
       el('button', { 'aria-label': 'Geri al', html: ikon(IKON.geri), onclick: () => geriAl() }));
@@ -748,7 +773,12 @@ function kalemKatmani(partId, yuzey, kagit) {
   Esle.yenile = yenileFn;
 
   function geriAl() {
-    if (veri.taslak.length) veri.taslak.pop(); else if (veri.silinen.length) veri.silinen.pop();
+    const is = islemler.pop();
+    if (is) {   // son işlemi tersine çevir: eklenen parçaları kaldır, silinenleri geri getir
+      const ekle = new Set(is.ekle), sil = new Set(is.silinen);
+      veri.taslak = veri.taslak.filter((c) => !ekle.has(c.id)).concat(is.kaldir);
+      veri.silinen = veri.silinen.filter((id) => !sil.has(id));
+    } else if (veri.taslak.length) veri.taslak.pop(); else if (veri.silinen.length) veri.silinen.pop();
     kaydetAyar(); ciz(); cubukCiz();
   }
   function kaydet() {
@@ -756,26 +786,66 @@ function kalemKatmani(partId, yuzey, kagit) {
     const silinen = new Set(veri.silinen);
     veri.kaydedilen = veri.kaydedilen.filter((c) => !silinen.has(c.id));
     veri.mezar = [...new Set([...(veri.mezar || []), ...veri.silinen])];   // silinenler cihazlar arası geri gelmesin
-    veri.taslak = []; veri.silinen = [];
+    veri.taslak = []; veri.silinen = []; islemler = [];
     kaydetAyar(); ciz(); cubukCiz();
     Esle.kirli(partId);
   }
-  function vazgec() { veri.taslak = []; veri.silinen = []; kaydetAyar(); ciz(); cubukCiz(); }
+  function vazgec() { veri.taslak = []; veri.silinen = []; islemler = []; kaydetAyar(); ciz(); cubukCiz(); }
 
   /* Çizim girdisi: yalnız kalem (ya da ?fare ile fare). Parmak kaydırır. */
   function nokta(e) {   // kâğıt pikseli + basınç
     const kr = kagit.getBoundingClientRect();
-    const p = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5;
+    const p = e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5;   // kalkış anındaki 0 basıncı yok sayılır
     return [Math.round((e.clientX - kr.left) / olcek * 10) / 10, Math.round((e.clientY - kr.top) / olcek * 10) / 10, Math.round(p * 100) / 100];
   }
   const cizebilir = (e) => (e.isPrimary !== false) && (e.pointerType === 'pen' || (fareIle && e.pointerType === 'mouse'));
+  const yeniKimlik = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function sik(noktalar, adim = 1.5) {   // seyrek noktaların arasını doldur ki silgi iki nokta arasından da kessin
+    const o = [noktalar[0]];
+    for (let i = 1; i < noktalar.length; i++) {
+      const [x0, y0, p0] = noktalar[i - 1], [x1, y1, p1] = noktalar[i], n = Math.floor(Math.hypot(x1 - x0, y1 - y0) / adim);
+      for (let k = 1; k < n; k++) { const t = k / n; o.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, p0 + (p1 - p0) * t]); }
+      o.push(noktalar[i]);
+    }
+    return o;
+  }
+  const kutuOnbellek = new WeakMap();
+  function cizgiKutusu(c) {
+    let k = kutuOnbellek.get(c);
+    if (!k) { const xs = c.noktalar.map((p) => p[0]), ys = c.noktalar.map((p) => p[1]); k = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; kutuOnbellek.set(c, k); }
+    return k;
+  }
   function siliciGec(e) {
-    const [x, y] = nokta(e);
+    const [x, y] = nokta(e), r = silgiYaricap();
+    const is = silgiIslem;
     const silinen = new Set(veri.silinen);
-    const deg = (c) => c.noktalar.some((p) => Math.hypot(p[0] - x, p[1] - y) < SILGI_YARI_CAP + c.kalinlik);
-    veri.taslak = veri.taslak.filter((c) => !deg(c));
-    for (const c of veri.kaydedilen) if (!silinen.has(c.id) && deg(c)) veri.silinen.push(c.id);
-    ciz();
+    const gorunen = [...veri.taslak, ...veri.kaydedilen.filter((c) => !silinen.has(c.id))];
+    let degisti = false;
+    for (const c of gorunen) {
+      const yc = r + c.kalinlik, [x0, y0, x1, y1] = cizgiKutusu(c);
+      if (x < x0 - yc || x > x1 + yc || y < y0 - yc || y > y1 + yc) continue;
+      const deger = (p) => Math.hypot(p[0] - x, p[1] - y) < yc;
+      if (!c.noktalar.some(deger)) continue;
+      degisti = true;
+      // Çizgiyi kaldır: taslaktaysa listeden çıkar, kayıtlıysa silinenlere ekle
+      if (veri.taslak.includes(c)) {
+        veri.taslak = veri.taslak.filter((t) => t !== c);
+        if (is.ekle.includes(c.id)) is.ekle = is.ekle.filter((id) => id !== c.id); else is.kaldir.push(c);
+      } else { veri.silinen.push(c.id); is.silinen.push(c.id); }
+      if (silgiKipi === 'cizgi') continue;
+      // Normal silgi: silgi dairesinin dışında kalan parçalar yeni çizgiler olarak kalır
+      let parca = [];
+      const parcalar = [];
+      for (const p of sik(c.noktalar)) { if (deger(p)) { if (parca.length) parcalar.push(parca); parca = []; } else parca.push(p); }
+      if (parca.length) parcalar.push(parca);
+      for (const pr of parcalar) {
+        if (pr.length < 2) continue;
+        const { id, ...ozellik } = c;
+        const yeni = { ...ozellik, id: yeniKimlik(), noktalar: pr.map((p) => p.map((v) => Math.round(v * 100) / 100)) };
+        veri.taslak.push(yeni); is.ekle.push(yeni.id);
+      }
+    }
+    if (degisti) ciz();
   }
   function basla(e) {
     if (!cizebilir(e)) return;
@@ -783,9 +853,10 @@ function kalemKatmani(partId, yuzey, kagit) {
     if (e.target.closest && e.target.closest('button, a, summary, input, .sayfalama')) return;
     e.preventDefault();
     try { yuzey.setPointerCapture(e.pointerId); } catch {}
-    if (arac === 'silgi') { aktifCizgi = 'silgi'; siliciGec(e); return; }
-    aktifCizgi = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), k: CIZGI_SURUM, arac, renk: renk[arac], kalinlik: KALINLIK[arac],
+    if (arac === 'silgi') { aktifCizgi = 'silgi'; silgiIslem = { ekle: [], kaldir: [], silinen: [] }; siliciGec(e); return; }
+    aktifCizgi = { id: yeniKimlik(), k: CIZGI_SURUM, arac, renk: renk[arac], kalinlik: kalinlikDeger(arac),
       basincYok: e.pointerType !== 'pen' || undefined, noktalar: [nokta(e)] };
+    olcum = { t0: performance.now(), olay: 0, birlesik: 0 };
     veri.taslak.push(aktifCizgi); ciz();
     aktifYol = katman.querySelector(`[data-id="${aktifCizgi.id}"]`);
   }
@@ -797,19 +868,39 @@ function kalemKatmani(partId, yuzey, kagit) {
     if (!aktifYol) { ciz(); return; }
     aktifYol.setAttribute('d', sekil(aktifCizgi));
   }
+  // Ekran güncellemesi kare başına bir kez (requestAnimationFrame): kalem olayları 120-240 Hz gelir; her olayda
+  // yolu yeniden kurmak ana iş parçacığını tıkayıp olay kaçırmaya (kesik çizgi) yol açabiliyordu.
+  let kareBekliyor = false, olcum = null, olcumSayisi = 0;
   function hareket(e) {
     if (!aktifCizgi || !cizebilir(e)) return;
     e.preventDefault();
     let olaylar = [];
     try { olaylar = e.getCoalescedEvents ? e.getCoalescedEvents() : []; } catch { olaylar = []; }
+    if (olcum) { olcum.olay++; if (olaylar.length > 1) olcum.birlesik++; }
     if (!olaylar.length) olaylar = [e];
     if (aktifCizgi === 'silgi') { olaylar.forEach(siliciGec); return; }
-    for (const o of olaylar) aktifCizgi.noktalar.push(nokta(o));
-    aktifGuncelle();
+    const n = aktifCizgi.noktalar;
+    for (const o of olaylar) {
+      const p = nokta(o), s0 = n[n.length - 1];
+      if (s0 && Math.hypot(p[0] - s0[0], p[1] - s0[1]) < 0.3) continue;   // aynı noktayı tekrar ekleme
+      n.push(p);
+    }
+    if (!kareBekliyor) { kareBekliyor = true; requestAnimationFrame(() => { kareBekliyor = false; if (aktifCizgi && aktifCizgi !== 'silgi') aktifGuncelle(); }); }
   }
   function bitis() {
     if (!aktifCizgi) return;
     const biten = aktifCizgi;
+    if (biten === 'silgi') { if (silgiIslem && (silgiIslem.ekle.length || silgiIslem.kaldir.length || silgiIslem.silinen.length)) islemler.push(silgiIslem); silgiIslem = null; }
+    else {
+      islemler.push({ ekle: [biten.id], kaldir: [], silinen: [] });
+      // Tanı: cihazdaki örnekleme hızı (ilk 6 çizgi). "Kesikli yazı" kök nedenini iPad'de kanıtlamak için.
+      if (olcum && olcumSayisi < 6 && !biten.basincYok) {
+        olcumSayisi++;
+        const sn = (performance.now() - olcum.t0) / 1000;
+        if (sn > 0.15) Tani.yaz('kalem örnekleme', { nokta: biten.noktalar.length, olay: olcum.olay, birlesikOlay: olcum.birlesik, hz: Math.round(biten.noktalar.length / sn), sn: sn.toFixed(2) });
+      }
+    }
+    olcum = null;
     aktifCizgi = null; aktifYol = null; kaydetAyar(); cubukCiz();
     if (biten !== 'silgi') ciz();   // son hâl: uç kapanışı (last: true) ile yeniden şekillenir
   }
