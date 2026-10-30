@@ -280,6 +280,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .arac .renk { width: 40px; height: 40px; }
 .arac .renk i { width: 24px; height: 24px; }
 .arac.kaydet-bar { gap: .7rem; padding: .6rem .95rem; bottom: calc(env(safe-area-inset-bottom) + 5rem); }
+/* Kayıt çubuğu açıkken sayfalama düğmeleri onun da üstünde kalsın (2026-10-30: çubuk 'Sonraki'yi örtüyordu) */
+.taslak-var .sayfa > .sayfalama { margin-bottom: calc(env(safe-area-inset-bottom) + 9.5rem); }
 .arac.kaydet-bar > span { font: 600 .95rem var(--yazi); padding: 0 .35rem; }
 .arac button.kaydet-d, .arac button.vazgec-d { width: auto; border-radius: 1.1rem; padding: 0 1.15rem; font: 700 .95rem var(--yazi); }
 .arac button.kaydet-d { background: var(--arter); color: #fff; }

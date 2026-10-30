@@ -463,6 +463,7 @@ function kalemKatmani(partId, yuzey) {
   let arac = 'kalem';
   let renk = { kalem: 'mürekkep', fosforlu: 'sarı' };
   let aktifCizgi = null;
+  let aktifYol = null;   // çizilmekte olan çizginin <path> öğesi
   const fareIle = location.search.includes('fare');
 
   const svg = document.createElementNS(SVG, 'svg');
@@ -573,6 +574,8 @@ function kalemKatmani(partId, yuzey) {
       el('button', { 'aria-label': 'Geri al', html: ikon(IKON.geri), onclick: () => geriAl() }));
     cubuk.replaceChildren(...dugmeler);
     kaydetBar.hidden = !taslakVar();
+    // Kayıt çubuğu görünürken sayfanın en altındaki Önceki/Sonraki düğmelerinin üstünü kapatmasın.
+    document.body.classList.toggle('taslak-var', taslakVar());
   }
   document.body.append(kaydetBar, cubuk);
   cubukCiz(); ciz();
@@ -624,6 +627,8 @@ function kalemKatmani(partId, yuzey) {
   }
   function basla(e) {
     if (!cizebilir(e)) return;
+    // Kalemle düğmeye/bağlantıya dokunmak çizim değil, tıklamadır (Sonraki, cevaplar, görsel büyüteci).
+    if (e.target.closest && e.target.closest('button, a, summary, input, .sayfalama')) return;
     e.preventDefault();
     try { yuzey.setPointerCapture(e.pointerId); } catch {}
     if (arac === 'silgi') { aktifCizgi = 'silgi'; siliciGec(e); return; }
@@ -632,6 +637,16 @@ function kalemKatmani(partId, yuzey) {
       onak: cap.onak, ax: cap.ax, ay: cap.ay, noktalar: [[0, 0]] };
     aktifCizgi.noktalar[0] = nokta(e, aktifCizgi);
     veri.taslak.push(aktifCizgi); ciz();
+    aktifYol = katman.querySelector(`[data-id="${aktifCizgi.id}"]`);
+  }
+  // Kalem hareketinde yalnız çizilen çizgi güncellenir; tüm çizgileri her harekette baştan kurmak
+  // çizgi sayısı arttıkça gecikme yapıyordu (2026-10-30 denetimi).
+  function aktifGuncelle() {
+    // Boyut değişimi (ResizeObserver → ciz) çizgi sürerken yolları yeniden kurmuş olabilir.
+    if (!aktifYol || !aktifYol.isConnected) aktifYol = katman.querySelector(`[data-id="${aktifCizgi.id}"]`);
+    if (!aktifYol) { ciz(); return; }
+    const noktalar = aktifCizgi.noktalar.map((p) => piksel(aktifCizgi, p)).filter(Boolean);
+    aktifYol.setAttribute('d', yolda(noktalar));
   }
   function hareket(e) {
     if (!aktifCizgi || !cizebilir(e)) return;
@@ -641,11 +656,13 @@ function kalemKatmani(partId, yuzey) {
     if (!olaylar.length) olaylar = [e];
     if (aktifCizgi === 'silgi') { olaylar.forEach(siliciGec); return; }
     for (const o of olaylar) aktifCizgi.noktalar.push(nokta(o, aktifCizgi));
-    ciz();
+    aktifGuncelle();
   }
   function bitis(e) {
     if (!aktifCizgi) return;
-    aktifCizgi = null; kaydetAyar(); cubukCiz();
+    const fosforlu = aktifCizgi !== 'silgi' && aktifCizgi.arac === 'fosforlu';
+    aktifCizgi = null; aktifYol = null; kaydetAyar(); cubukCiz();
+    if (fosforlu) ciz();
   }
   yuzey.addEventListener('pointerdown', basla);
   yuzey.addEventListener('pointermove', hareket);
@@ -695,9 +712,19 @@ function kalemKatmani(partId, yuzey) {
       return true;
     },
     kaldir() {
+      // yuzey (main.sayfa) sayfalar arasında AYNI öğe kalıyor: dinleyicileri kaldırmazsak eski sayfanın
+      // kalem katmanı canlı kalır ve yeni çizgileri önceki sayfaların kaydına da yazar (2026-10-30 denetimi).
+      yuzey.removeEventListener('pointerdown', basla);
+      yuzey.removeEventListener('pointermove', hareket);
+      yuzey.removeEventListener('pointerup', bitis);
+      yuzey.removeEventListener('pointercancel', bitis);
+      yuzey.removeEventListener('touchstart', kalemTouch, { passive: false });
+      yuzey.removeEventListener('touchmove', kalemTouch, { passive: false });
+      svg.remove(); zemin.remove();
       ro.disconnect(); removeEventListener('orientationchange', don); removeEventListener('pencilCiftDokun', pencilCb);
       removeEventListener('pointerup', kalemBitti); removeEventListener('pointercancel', kalemBitti);
       cubuk.remove(); kaydetBar.remove(); bilgi.remove();
+      document.body.classList.remove('taslak-var');
       if (Esle.yenile === yenileFn) Esle.yenile = null;
     },
   };
