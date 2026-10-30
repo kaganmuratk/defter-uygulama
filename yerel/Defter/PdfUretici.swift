@@ -10,9 +10,9 @@ import CryptoKit
 final class PdfUretici: NSObject, WKNavigationDelegate {
     static let ortak = PdfUretici()
     static let stilSurumu = "3"
-    static let kagit: CGFloat = 800, solPay: CGFloat = 48, ustPay: CGFloat = 44, altPay: CGFloat = 64
-    static var sayfaGenislik: CGFloat { kagit + 2 * solPay }
-    static let enAzYukseklik: CGFloat = 1150   // kısa bölümlerde altta not alacak yer kalsın
+    nonisolated static let kagit: CGFloat = 800, solPay: CGFloat = 48, ustPay: CGFloat = 44, altPay: CGFloat = 64
+    nonisolated static var sayfaGenislik: CGFloat { kagit + 2 * solPay }
+    nonisolated static let enAzYukseklik: CGFloat = 1150   // kısa bölümlerde altta not alacak yer kalsın
 
     private var webView: WKWebView?
     private var yuklendi: CheckedContinuation<Void, Never>?
