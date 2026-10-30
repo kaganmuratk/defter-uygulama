@@ -18,7 +18,7 @@ struct KutuphaneEkrani: View {
                     Text("Kitaplar").font(.title3.weight(.bold)).foregroundStyle(.secondary)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 18)], spacing: 18) {
                         ForEach(icerik.plan?.dersler ?? []) { d in
-                            NavigationLink(value: d) { KitapKarti(ders: d, ilerleme: icerik.ilerleme) }.buttonStyle(.plain)
+                            NavigationLink(value: d) { KitapKarti(ders: d, ilerleme: icerik.ilerleme) }.buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
                         }
                     }
                     if icerik.plan == nil {
@@ -118,7 +118,6 @@ struct KitapKarti: View {
         .background(Tema.kart, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.07), radius: 14, y: 6)
-        .accessibilityIdentifier("kitap-" + ders.id)
     }
 }
 
