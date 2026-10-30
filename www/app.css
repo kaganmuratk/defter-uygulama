@@ -125,7 +125,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .perde { position: fixed; inset: 0; z-index: 30; background: rgba(8, 16, 28, .45); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .perde.acik { opacity: 1; pointer-events: auto; }
 
-.sayfa { max-width: var(--sutun); margin: 0 auto; padding: 2.2rem 1.4rem 9rem; }
+/* Sayfa: en az ekran kadar esneyen sütun — sayfalama margin-top:auto ile alta sabitlenir
+   (Kağan 2026-10-29: kısa sayfalarda butonlar ortada kalmasın, altına da yazılabilsin).
+   position: relative + z-index:0 → kalem katmanı TÜM sayfa yüzeyini kaplar (her yere yazım). */
+.sayfa {
+  position: relative; z-index: 0;
+  display: flex; flex-direction: column;
+  width: 100%; max-width: none;
+  min-height: calc(100vh - 3.4rem); min-height: calc(100dvh - 3.4rem);
+  margin: 0 auto; padding: 2.2rem 1.4rem 1.5rem;
+}
+.sayfa > .metin, .sayfa > .sayfalama { width: 100%; max-width: var(--sutun); margin-left: auto; margin-right: auto; }
 .sayfa .no { font-size: .95rem; font-weight: 700; color: var(--arter); margin: 0 0 .4rem; }
 .sayfa h1 { font: 800 clamp(1.9rem, 5.5vw, 2.7rem)/1.12 var(--yazi); letter-spacing: -.03em; margin: 0 0 1.6rem; }
 .metin { position: relative; }
@@ -156,7 +166,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cevaplar summary { font-weight: 700; padding: 1rem 0; min-height: 48px; cursor: pointer; color: var(--ven); }
 .cevaplar[open] summary { border-bottom: 1px solid var(--cizgi); margin-bottom: .9rem; }
 
-.sayfalama { display: flex; gap: .8rem; margin-top: 3rem; }
+.sayfalama { display: flex; gap: .8rem; margin-top: auto; padding-top: 3rem; }
+.sayfa > .sayfalama { margin-bottom: calc(env(safe-area-inset-bottom) + 4.6rem); }
 .sayfalama button {
   flex: 1; min-height: 3.5rem; border-radius: 1.1rem; border: 1.5px solid var(--cizgi); background: var(--yuzey);
   font: 700 1.05rem/1.2 var(--yazi); display: flex; align-items: center; justify-content: center; gap: .5rem;
@@ -170,6 +181,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- Çizim katmanı ve araç çubuğu ---------- */
 .cizim { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; overflow: visible; }
+.cizim-zemin { z-index: -1; }
 .cizim path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .cizim .fosforlu { mix-blend-mode: multiply; opacity: .55; }
 :root[data-tema="koyu"] .cizim .fosforlu { mix-blend-mode: screen; opacity: .4; }
@@ -241,3 +253,52 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ikincil { display: block; width: 100%; min-height: 3.2rem; margin: -1.6rem 0 1.4rem; border-radius: 1rem; border: 1.5px solid var(--cizgi); background: none; font: 700 1rem/1.2 var(--yazi); }
 .ayar .devam { margin-bottom: 1rem; }
 .ayar .ikincil { margin: 0 0 .7rem; }
+
+
+/* ---------- 2026-10-29 Kağan geri bildirimleri: iç içe kütüphane + cila ---------- */
+.ana .geri { margin: 0 0 .2rem; margin-left: -.2rem; }
+.kitap {
+  display: flex; align-items: center; gap: 1rem; width: 100%; text-align: left; margin: 0 0 .8rem;
+  background: var(--yuzey); border: 1px solid var(--cizgi); border-radius: 1.3rem; padding: 1.15rem 1.3rem; min-height: 4.6rem;
+  box-shadow: var(--gol); transition: transform .12s;
+}
+.kitap:active { transform: scale(.99); }
+.kitap > span:first-child { flex: 1; min-width: 0; }
+.kitap h2 { font: 800 1.3rem/1.25 var(--yazi); letter-spacing: -.02em; margin: 0; }
+.kitap p { font-size: .98rem; color: var(--soluk); margin: .25rem 0 0; }
+.kitap .ozet { display: flex; align-items: center; gap: .45rem; color: var(--soluk); font-weight: 700; font-size: 1rem; flex: none; }
+.kitap .ok { display: grid; place-items: center; color: var(--ven); font-style: normal; }
+.kitap .ok svg { width: 22px; height: 22px; }
+
+/* Araç çubuğu: daha ferah, cam görünümlü (Kağan: "alt bar biraz daha güzel olsun") */
+.arac {
+  gap: .25rem; padding: .45rem .65rem; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--yuzey) 88%, transparent); border-radius: 1.75rem;
+}
+.arac button { transition: background .12s, transform .12s; }
+.arac button:active { transform: scale(.92); }
+.arac .renk { width: 40px; height: 40px; }
+.arac .renk i { width: 24px; height: 24px; }
+.arac.kaydet-bar { gap: .7rem; padding: .6rem .95rem; bottom: calc(env(safe-area-inset-bottom) + 5rem); }
+.arac.kaydet-bar > span { font: 600 .95rem var(--yazi); padding: 0 .35rem; }
+.arac button.kaydet-d, .arac button.vazgec-d { width: auto; border-radius: 1.1rem; padding: 0 1.15rem; font: 700 .95rem var(--yazi); }
+.arac button.kaydet-d { background: var(--arter); color: #fff; }
+.arac button.vazgec-d { border: 1.5px solid var(--cizgi); background: none; }
+
+/* Pencil çift dokunuş rozeti */
+.arac-bilgi {
+  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 5.6rem); transform: translateX(-50%);
+  z-index: 31; background: var(--murekkep); color: var(--kemik); font: 700 .88rem var(--yazi);
+  padding: .35rem .9rem; border-radius: 999px; pointer-events: none; min-height: 0;
+}
+.arac-bilgi:empty { display: none; }
+
+/* Kayıt sorusu kutusu (satır içi stillerden kurtarıldı) */
+.soru-arka { position: fixed; inset: 0; z-index: 60; background: rgba(8,16,22,.55); display: grid; place-items: center; padding: 1.5rem; }
+.soru-kut { background: var(--kemik); color: var(--murekkep); border-radius: 1.2rem; padding: 1.4rem; max-width: 22rem; width: 100%; font-family: var(--yazi); }
+.soru-kut h2 { font: 700 1.25rem var(--yazi); margin: 0 0 .5rem; }
+.soru-kut p { margin: 0 0 1.2rem; color: var(--soluk); line-height: 1.45; }
+.soru-dug { display: flex; gap: .6rem; justify-content: flex-end; }
+.soru-dug button { min-height: 48px; border-radius: 1rem; padding: 0 1.2rem; font: 700 1rem var(--yazi); }
+.soru-dug button.ciz { border: 1.5px solid var(--murekkep); background: none; color: inherit; }
+.soru-dug button.kaydet-d { border: 0; background: var(--arter); color: #fff; }

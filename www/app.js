@@ -1,6 +1,12 @@
 /* Fizyoloji defteri — yerel uygulama. Sunucu yok; veri bu cihazda (Depo) tutulur.
-   Depo, ileride senkron katmanı eklenebilsin diye tek yerde toplandı. */
+   Depo, ileride senkron katmanı eklenebilsin diye tek yerde toplandı.
+   2026-10-29 Kağan geri bildirimleri: tam ekran yazım, çizgilerin içerik öğelerine
+   çapalanması (döndürmede kaymaz), piksel tabanlı pürüzsüz çizim, alta sabit sayfalama,
+   ağ isteklerinde otomatik tekrar deneme, iç içe kütüphane (kitap→bölüm→part),
+   Apple Pencil Pro çift dokunuş → silgi. */
 'use strict';
+
+const bekle = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- Depo ---------- */
 const Depo = {
@@ -45,7 +51,6 @@ const IKON = {
   geri: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
 };
 
-
 /* ---------- Ayar: sunucu adresi ve anahtar ---------- */
 const VARSAYILAN_SUNUCU = 'https://defter-api.revela-site.workers.dev';
 const Ayar = {
@@ -55,7 +60,10 @@ const Ayar = {
 };
 const sunucuUrl = (yol) => `${Ayar.sunucu}${yol}${yol.includes('?') ? '&' : '?'}k=${encodeURIComponent(Ayar.anahtar)}`;
 
-/* ---------- İçerik: sunucudan çek, cihazda (IndexedDB) sakla, internetsiz de çalış ---------- */
+/* ---------- İçerik: sunucudan çek, cihazda (IndexedDB) sakla, internetsiz de çalış ----------
+   2026-10-29 düzeltme: tek deneme + 4 sn zaman aşımı, uykudan uyanan iPad'de ağı henüz
+   hazır değilken "İçerik yüklenemedi" hatası veriyordu (Kağan'ın bildirdiği hata).
+   Artık 10 sn + 3 deneme (0 / 1,2 / 2,4 sn arayla); başarısızsa yine cihaz önbelleği deneniyor. */
 const Icerik = {
   _db: null,
   db() {
@@ -74,15 +82,28 @@ const Icerik = {
     const db = await this.db();
     return new Promise((coz) => { const t = db.transaction('dosya', 'readwrite'); t.objectStore('dosya').put(deger, anahtar); t.oncomplete = () => coz(); t.onerror = () => coz(); });
   },
-  async ag(yol, ms = 4000) {
-    if (navigator.onLine === false) throw new Error('çevrimdışı');
-    const k = new AbortController(); const z = setTimeout(() => k.abort(), ms);
-    try {
-      const r = await fetch(sunucuUrl('/icerik/' + yol), { signal: k.signal });
-      if (r.status === 401) throw Object.assign(new Error('yetkisiz'), { yetkisiz: true });
-      if (!r.ok) throw new Error('sunucu ' + r.status);
-      return r;
-    } finally { clearTimeout(z); }
+  async ag(yol, ms = 10000, deneme = 3) {
+    let sonHata = new Error('çevrimdışı');
+    for (let i = 0; i < deneme; i++) {
+      if (navigator.onLine === false) break;   // çevrimdışıysa boşuna bekleme; önbellek hemen devreye girsin
+      const k = new AbortController(); const z = setTimeout(() => k.abort(), ms);
+      try {
+        const r = await fetch(sunucuUrl('/icerik/' + yol), { signal: k.signal });
+        if (r.status === 401) throw Object.assign(new Error('yetkisiz'), { yetkisiz: true });
+        if (!r.ok) {
+          const hata = new Error('sunucu ' + r.status);
+          // Yalnız geçici sunucu/ağ hatalarını tekrar dene; 404 gibi kalıcı hatayı 30 sn bekletme.
+          hata.yeniden = r.status >= 500 || r.status === 408 || r.status === 429;
+          throw hata;
+        }
+        return r;
+      } catch (e) {
+        if (e.yetkisiz || e.yeniden === false) throw e;
+        sonHata = e;
+      } finally { clearTimeout(z); }
+      if (i + 1 < deneme) await bekle(1200 * (i + 1));
+    }
+    throw sonHata;
   },
   async json(yol) {
     try { const v = await (await this.ag(yol)).json(); await this.koy('json:' + yol, v); return v; }
@@ -172,25 +193,31 @@ function temaDugmesi() {
 }
 temaUygula();
 
-/* ---------- Yönlendirme ---------- */
+/* ---------- Yönlendirme: kitaplar → kitap → bölüm → part ---------- */
 let aktifTemizle = null;
+let hataBekci = null;
 async function yonlendir() {
   if (aktifTemizle) { aktifTemizle(); aktifTemizle = null; }
-  const [, ekran, id] = location.hash.split('/');
+  clearTimeout(hataBekci); hataBekci = null;
+  const parca = location.hash.split('/');
+  const [, ekran, a, b] = parca;
   window.scrollTo(0, 0);
   if (!Ayar.anahtar) return ayarEkrani();
   try {
     if (ekran === 'ayar') return ayarEkrani();
-    if (ekran === 'part' && id) await partEkrani(id);
-    else await anaEkran();
+    if (ekran === 'kitap' && a) return await kitapEkrani(a);
+    if (ekran === 'bolum' && a && b) return await bolumEkrani(a, b);
+    if (ekran === 'part' && a) return await partEkrani(a);
+    return await anaEkran();
   } catch (e) {
     if (e.yetkisiz) return ayarEkrani('Anahtar kabul edilmedi.');
     uygulama.replaceChildren(el('div', { class: 'ana' },
       temaDugmesi(),
       el('h1', {}, 'Açılamadı'),
-      el('p', { class: 'alt' }, 'İçerik yüklenemedi. İlk açılışta internet gerekir.'),
-      el('button', { class: 'devam', onclick: () => yonlendir() }, el('span', {}, 'Tekrar dene'))));
+      el('p', { class: 'alt' }, 'İçerik yüklenemedi. Bağlantın varsa birkaç saniye içinde kendisi yeniden deneyecek.'),
+      el('button', { class: 'devam', onclick: () => yonlendir() }, el('span', {}, 'Şimdi dene'))));
     console.error(e);
+    hataBekci = setTimeout(() => { if (document.visibilityState === 'visible') yonlendir(); }, 6000);   // uyku→uyanış yarışında kendi toparlasın
   }
 }
 window.addEventListener('hashchange', yonlendir);
@@ -216,7 +243,7 @@ function ayarEkrani(mesaj) {
   uygulama.replaceChildren(kok);
 }
 
-/* ---------- Ana ekran: ders > bölüm > part ---------- */
+/* ---------- Ana ekran: kitaplar (iç içe kütüphanenin ilk katmanı) ---------- */
 async function anaEkran() {
   const plan = await json('icerik/plan.json');
   const ilerleme = Depo.ilerleme();
@@ -226,8 +253,8 @@ async function anaEkran() {
   const siradaki = son || tum.find((p) => p.hazir && !(ilerleme[p.id] && ilerleme[p.id].durum === 'bitti'));
 
   const kok = el('div', { class: 'ana' }, temaDugmesi(),
-    el('button', { class: 'dugme-yuvarlak ayar-dugme', 'aria-label': 'Ayarlar', onclick: () => { location.hash = '#/ayar'; }, html: ikon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>', 20) }),
-    el('h1', {}, 'Antrenör defteri'));
+    el('button', { class: 'dugme-yuvarlak ayar-dugme', 'aria-label': 'Ayarlar', onclick: () => { location.hash = '#/ayar'; }, html: ikon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1-.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>', 20) }),
+    el('h1', {}, 'Defter'));
 
   if (siradaki && siradaki.hazir) {
     const yarim = son && son.id === siradaki.id;
@@ -238,37 +265,74 @@ async function anaEkran() {
   }
 
   for (const ders of plan.dersler) {
-    for (const bolum of ders.bolumler) {
-      const bitenler = bolum.partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
-      kok.append(el('div', { class: 'bolum' },
-        el('h2', {}, `${ders.baslik}, Bölüm ${bolum.no}: ${bolum.baslik}`),
-        el('span', {}, `${bitenler} / ${bolum.partlar.length}`)));
-      const hat = el('ol', { class: 'hat' });
-      for (const p of bolum.partlar) {
-        const d = ilerleme[p.id] && ilerleme[p.id].durum;
-        const durum = !p.hazir ? 'yok' : d === 'bitti' ? 'bitti' : d === 'yarim' ? 'yarim' : 'hazir';
-        const durumYazi = { bitti: 'Bitti', yarim: 'Yarım', hazir: 'Başlamadı', yok: 'Yazılıyor' }[durum];
-        const icerik = [
-          el('h2', {}, `Part ${p.no}: ${p.baslik}`),
-          el('p', {}, el('span', { class: durum === 'yarim' || durum === 'bitti' ? 'durum' : '' }, durumYazi), ` · ${p.kitap}`),
-        ];
-        const dugum = el('span', { class: 'dugum', html: durum === 'bitti' ? ikon(IKON.tik, 13) : '' });
-        const satir = p.hazir
-          ? el('button', { onclick: () => (location.hash = '#/part/' + p.id) }, dugum, icerik)
-          : el('div', {}, dugum, icerik);
-        hat.append(el('li', { class: 'durak', 'data-durum': durum }, satir));
-      }
-      kok.append(hat);
-    }
+    const partlar = ders.bolumler.flatMap((b) => b.partlar);
+    const biten = partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
+    kok.append(el('button', { class: 'kitap', onclick: () => (location.hash = '#/kitap/' + ders.id) },
+      el('span', {}, el('h2', {}, ders.baslik), el('p', {}, `${ders.bolumler.length} bölüm · ${partlar.length} part${ders.kaynak ? ' · ' + ders.kaynak : ''}`)),
+      el('span', { class: 'ozet' }, `${biten}/${partlar.length}`, el('i', { class: 'ok', html: ikon(IKON.sag, 22) }))));
   }
-  kok.append(el('p', { class: 'sonra' }, 'Sonraki bölümler hazır oldukça eklenecek.'));
+  kok.append(el('p', { class: 'sonra' }, 'Yeni kitaplar hazır oldukça buraya eklenecek.'));
   uygulama.replaceChildren(kok);
-  document.title = 'Antrenör defteri';
+  document.title = 'Defter';
+}
+
+/* ---------- Kitap ekranı: bölümler ---------- */
+async function kitapEkrani(kitapId) {
+  const plan = await json('icerik/plan.json');
+  const ders = plan.dersler.find((d) => d.id === kitapId);
+  if (!ders) { location.hash = '#/'; return; }
+  const ilerleme = Depo.ilerleme();
+  const kok = el('div', { class: 'ana' }, temaDugmesi(),
+    el('button', { class: 'ust-geri', onclick: () => (location.hash = '#/') }, el('span', { html: ikon(IKON.sol, 20) }), 'Kitaplar'),
+    el('h1', {}, ders.baslik),
+    ders.kaynak ? el('p', { class: 'alt' }, 'Kaynak: ' + ders.kaynak) : null);
+  for (const bolum of ders.bolumler) {
+    const biten = bolum.partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
+    kok.append(el('button', { class: 'kitap', onclick: () => (location.hash = `#/bolum/${ders.id}/${bolum.no}`) },
+      el('span', {}, el('h2', {}, `Bölüm ${bolum.no}: ${bolum.baslik}`), el('p', {}, `${bolum.partlar.length} part`)),
+      el('span', { class: 'ozet' }, `${biten}/${bolum.partlar.length}`, el('i', { class: 'ok', html: ikon(IKON.sag, 22) }))));
+  }
+  uygulama.replaceChildren(kok);
+  document.title = ders.baslik + ' — Defter';
+}
+
+/* ---------- Bölüm ekranı: part listesi ---------- */
+async function bolumEkrani(kitapId, bolumNo) {
+  const plan = await json('icerik/plan.json');
+  const ders = plan.dersler.find((d) => d.id === kitapId);
+  const bolum = ders && ders.bolumler.find((b) => String(b.no) === String(bolumNo));
+  if (!bolum) { location.hash = '#/kitap/' + kitapId; return; }
+  const ilerleme = Depo.ilerleme();
+  const kok = el('div', { class: 'ana' }, temaDugmesi(),
+    el('button', { class: 'ust-geri', onclick: () => (location.hash = '#/kitap/' + ders.id) }, el('span', { html: ikon(IKON.sol, 20) }), ders.baslik),
+    el('h1', {}, `Bölüm ${bolum.no}: ${bolum.baslik}`));
+  const bitenler = bolum.partlar.filter((p) => (ilerleme[p.id] || {}).durum === 'bitti').length;
+  kok.append(el('p', { class: 'alt' }, `${bitenler} / ${bolum.partlar.length} part bitti`));
+  const hat = el('ol', { class: 'hat' });
+  for (const p of bolum.partlar) {
+    const d = ilerleme[p.id] && ilerleme[p.id].durum;
+    const durum = !p.hazir ? 'yok' : d === 'bitti' ? 'bitti' : d === 'yarim' ? 'yarim' : 'hazir';
+    const durumYazi = { bitti: 'Bitti', yarim: 'Yarım', hazir: 'Başlamadı', yok: 'Yazılıyor' }[durum];
+    const icerik = [
+      el('h2', {}, `Part ${p.no}: ${p.baslik}`),
+      el('p', {}, el('span', { class: durum === 'yarim' || durum === 'bitti' ? 'durum' : '' }, durumYazi), ` · ${p.kitap}`),
+    ];
+    const dugum = el('span', { class: 'dugum', html: durum === 'bitti' ? ikon(IKON.tik, 13) : '' });
+    const satir = p.hazir
+      ? el('button', { onclick: () => (location.hash = '#/part/' + p.id) }, dugum, icerik)
+      : el('div', {}, dugum, icerik);
+    hat.append(el('li', { class: 'durak', 'data-durum': durum }, satir));
+  }
+  kok.append(hat);
+  uygulama.replaceChildren(kok);
+  document.title = `Bölüm ${bolum.no} — Defter`;
 }
 
 /* ---------- Part ekranı: her bölüm ayrı sayfa ---------- */
 async function partEkrani(id) {
-  const part = await json(`icerik/${id}.json`);
+  const [plan, part] = await Promise.all([json('icerik/plan.json'), json(`icerik/${id}.json`)]);
+  let geriYol = '#/';
+  for (const d of plan.dersler) for (const b of d.bolumler) if (b.partlar.some((p) => p.id === id)) geriYol = `#/bolum/${d.id}/${b.no}`;
   const bolumler = part.bolumler, N = bolumler.length;
   const kayit = Depo.ilerleme()[id] || {};
   let sayfa = Math.min(Math.max(kayit.sayfa || 0, 0), N - 1);
@@ -278,7 +342,7 @@ async function partEkrani(id) {
 
   const ilerlemeCubuk = el('div', { class: 'ilerleme', 'aria-hidden': 'true' }, el('i'));
   const ust = el('header', { class: 'ust' },
-    el('button', { class: 'geri', onclick: () => cikis() }, el('span', { html: ikon(IKON.sol, 20) }), 'Partlar'),
+    el('button', { class: 'geri', onclick: () => cikis() }, el('span', { html: ikon(IKON.sol, 20) }), 'Geri'),
     el('span', { class: 'ad' }, `Part ${part.no}: ${part.baslik}`),
     el('button', { class: 'dugme-yuvarlak', 'aria-label': 'Bölüm listesini aç ya da kapat', onclick: () => listeDegis(), html: ikon(IKON.liste, 20) }),
     temaDugmesi(), ilerlemeCubuk);
@@ -314,6 +378,8 @@ async function partEkrani(id) {
   function bitirDegis() {
     const bitti = (Depo.ilerleme()[id] || {}).durum === 'bitti';
     Depo.ilerlemeYaz(id, { durum: bitti ? 'yarim' : 'bitti' });
+    // Eski kalem örneğini bırakıp yeniden kur; aksi hâlde her basışta dinleyici/observer birikir.
+    if (kalem) { kalem.kaldir(); kalem = null; }
     sayfaCiz();
   }
   function sayfaCiz() {
@@ -331,8 +397,10 @@ async function partEkrani(id) {
       ? el('button', { class: 'bitir', 'aria-pressed': String(bitti), onclick: bitirDegis }, bitti ? 'Bitti, geri almak için dokun' : 'Bitirdim')
       : el('button', { class: 'ileri', onclick: () => git(sayfa + 1) }, 'Sonraki', el('span', { html: ikon(IKON.sag, 20) }));
     const geri = el('button', { disabled: sayfa === 0, onclick: () => git(sayfa - 1) }, el('span', { html: ikon(IKON.sol, 20) }), 'Önceki');
+    // Kalem katmanı ARTIK TÜM sayfa yüzeyinde (Kağan 2026-10-29: "ekranın her yerine yazayım").
+    // Önce metin+sayfalama basılır, sonra kalem katmanı en üste eklenir.
     sayfaKutu.replaceChildren(
-      el('p', { class: 'no' }, `${sayfa + 1} / ${N}`), metin,
+      metin,
       el('div', { class: 'sayfalama' }, geri, ileri));
     $('i', ilerlemeCubuk).style.width = ((sayfa + 1) / N * 100) + '%';
     [...liste.children].forEach((li, i) => {
@@ -346,84 +414,149 @@ async function partEkrani(id) {
       bImg.src = g.src; bImg.alt = g.alt; buyutec.classList.remove('yakin'); buyutec.hidden = false;
     });
     buyutec.onclick = () => { if (buyutec.classList.contains('yakin')) buyutec.hidden = true; else buyutec.classList.add('yakin'); };
-    kalem = kalemKatmani(`${id}#${sayfa}`, metin);
+    kalem = kalemKatmani(`${id}#${sayfa}`, sayfaKutu);
   }
   async function cikis() {
     if (kalem && !(await kalem.cikisKontrol())) return;
-    location.hash = '#/';
+    location.hash = geriYol;
   }
   kaydet(); sayfaCiz();
   aktifTemizle = () => { if (kalem) kalem.kaldir(); $('#buyutec').hidden = true; };
 }
 
-/* ---------- Kalem katmanı ---------- */
+/* ---------- Kalem katmanı ----------
+   2026-10-29 değişiklikleri (Kağan'ın geri bildirimleri):
+   - Yüzey artık tüm sayfa (metin sütunu değil): ekranın her yerine yazılır.
+   - Çizgiler içerik ÖĞELERİNE çapalanır (öğne): çizginin başladığı paragraf/başlık/görsel
+     + o öğenin kutusuna göre bağıl koordinat. Döndürmede satır yükseklikleri değişse de
+     çizgi aynı kelimenin yanında kalır (dikey↔yatay kayma sorunu).
+   - Çizim piksel uzayında (eski 1000 birimlik viewBox ölçeği çizgileri pikselleştiriyordu).
+   - Apple Pencil Pro: çift dokunuş → silgi; çizgi bitince → önceki araca dönüş. */
 const RENKLER = {
-  kalem: [['murekkep', 'var(--murekkep)'], ['ven', '#3b5bdb'], ['arter', '#e03131']],
-  fosforlu: [['sari', '#f3d44a'], ['yesil', '#8fd694'], ['pembe', '#f4a6c0']],
+  kalem: [['mürekkep', 'var(--murekkep)'], ['lacivert', '#1c7ed6'], ['yeşil', '#2f9e44'], ['turuncu', '#e8590c'], ['bordo', '#c2255c'], ['mor', '#6741d9']],
+  fosforlu: [['sarı', '#f3d44a'], ['yeşil', '#8fd694'], ['pembe', '#f4a6c0'], ['turuncu', '#f9a825'], ['mavi', '#74c0fc']],
 };
-const KALINLIK = { kalem: 2.2, fosforlu: 16 };
+const KALINLIK = { kalem: 3, fosforlu: 18 };
+const SILGI_YARI_CAP = 42;   // piksel; eski davranış 14/1000 birim ≈ 13-15 px'ti, aynı his
 
-function kalemKatmani(partId, metin) {
-  const VB = 1000; // x ekseni 0..1000 (sütun genişliği)
+const CAPA_SELC = 'h1,h2,h3,h4,p,li,img,blockquote,hr,table,.tablo,ol,ul,.sayfalama,.cevaplar,figure';
+
+function kalemKatmani(partId, yuzey) {
   let veri = Depo.cizim(partId);
+  // 2026-10-29 öncesi çizimler .metin sütununa göre 1000 birimlik uzaydaydı.
+  // Yeni tam-sayfa yüzeyine taşırken eski çizgileri kaybetmeden dönüştür.
+  const eskiMetin = yuzey.querySelector('.metin');
+  if (eskiMetin && [...veri.kaydedilen, ...veri.taslak].some((c) => !c.onak)) {
+    const yr = yuzey.getBoundingClientRect(), mr = eskiMetin.getBoundingClientRect();
+    const w = Math.max(yuzey.clientWidth, 1), h = Math.max(yuzey.clientHeight, 1);
+    const cevir = (c) => {
+      if (c.onak) return c;
+      return { ...c, onak: 'y', noktalar: c.noktalar.map(([x, y]) => [
+        (mr.left - yr.left + (x / 1000) * mr.width) / w,
+        (mr.top - yr.top + (y / 1000) * mr.width) / h,
+      ]) };
+    };
+    veri.kaydedilen = veri.kaydedilen.map(cevir);
+    veri.taslak = veri.taslak.map(cevir);
+    Depo.cizimYaz(partId, veri);
+  }
   let arac = 'kalem';
-  let renk = { kalem: 'murekkep', fosforlu: 'sari' };
+  let renk = { kalem: 'mürekkep', fosforlu: 'sarı' };
   let aktifCizgi = null;
   const fareIle = location.search.includes('fare');
 
   const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('class', 'cizim');
   svg.setAttribute('aria-hidden', 'true');
-  metin.append(svg);
+  yuzey.append(svg);
+  // Fosforlu kalem, kaydedildikten sonra metnin ALTINA geçsin (okunabilirlik).
+  const zemin = document.createElementNS(SVG, 'svg');
+  zemin.setAttribute('class', 'cizim cizim-zemin');
+  zemin.setAttribute('aria-hidden', 'true');
+  yuzey.prepend(zemin);
   const katman = document.createElementNS(SVG, 'g');
   svg.append(katman);
+  const zeminKatman = document.createElementNS(SVG, 'g');
+  zemin.append(zeminKatman);
+
+  let onakSayac = 0;
+  const onakEl = new Map();   // onak id -> element
+  yuzey.querySelectorAll(CAPA_SELC).forEach((e) => { const a = 'c' + (++onakSayac); e.setAttribute('data-ciz-onak', a); onakEl.set(a, e); });
+  yuzey.setAttribute('data-ciz-onak', 'y');
 
   function boyutla() {
-    const w = metin.clientWidth || 1, h = metin.scrollHeight || 1;
-    svg.setAttribute('viewBox', `0 0 ${VB} ${(h / w) * VB}`);
-    svg.setAttribute('preserveAspectRatio', 'none');
-    svg.style.height = h + 'px';
+    const w = yuzey.clientWidth || 1, h = yuzey.clientHeight || 1;
+    for (const kat of [svg, zemin]) {
+      kat.setAttribute('width', w);
+      kat.setAttribute('height', h);
+      kat.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    }
   }
-  const ro = new ResizeObserver(boyutla); ro.observe(metin); boyutla();
-  metin.querySelectorAll('img').forEach((i) => i.addEventListener('load', boyutla));
+  const ro = new ResizeObserver(() => { boyutla(); ciz(); });
+  ro.observe(yuzey); boyutla();
+  const don = () => { boyutla(); ciz(); setTimeout(() => { boyutla(); ciz(); }, 350); };   // döndürme sonrası geç düzen
+  addEventListener('orientationchange', don);
+
+  function kutu(c) {   // çizginin çapasının ŞU ANDAKİ kutusu (yüzeyin sol üstüne göre, px)
+    const e = c.onak === 'y' ? yuzey : yuzey.querySelector(`[data-ciz-onak="${c.onak}"]`);
+    if (!e) return null;
+    const yr = yuzey.getBoundingClientRect(), r = e.getBoundingClientRect();
+    return { x: r.left - yr.left, y: r.top - yr.top, w: Math.max(r.width, 1), h: Math.max(r.height, 1) };
+  }
+  const piksel = (c, p) => {
+    if (!c.onak) {   // v1 (2026-10-29 öncesi): 1000 birimlik genişlik uzayı — eski konumunda kalsın
+      const w = yuzey.clientWidth || 1;
+      return [p[0] / 1000 * w, p[1] / 1000 * w];
+    }
+    const r = kutu(c);
+    return r ? [r.x + p[0] * r.w, r.y + p[1] * r.h] : null;
+  };
 
   const renkDeger = (ad) => (Object.values(RENKLER).flat().find((r) => r[0] === ad) || [0, 'currentColor'])[1];
-  function yolMetni(noktalar) {
-    if (noktalar.length === 1) { const [x, y] = noktalar[0]; return `M${x} ${y}l0.01 0`; }
-    let d = `M${noktalar[0][0]} ${noktalar[0][1]}`;
-    for (let i = 1; i < noktalar.length - 1; i++) {
-      const [x, y] = noktalar[i], [nx, ny] = noktalar[i + 1];
+  function yolda(noktalar) {
+    const p = [];
+    for (const n of noktalar) if (!p.length || Math.hypot(n[0] - p[p.length - 1][0], n[1] - p[p.length - 1][1]) > 0.7) p.push(n);
+    if (!p.length) return 'M0 0';
+    if (p.length === 1) return `M${p[0][0]} ${p[0][1]}l0.01 0`;
+    let d = `M${p[0][0]} ${p[0][1]}`;
+    for (let i = 1; i < p.length - 1; i++) {
+      const [x, y] = p[i], [nx, ny] = p[i + 1];
       d += `Q${x} ${y} ${(x + nx) / 2} ${(y + ny) / 2}`;
     }
-    const son = noktalar[noktalar.length - 1];
+    const son = p[p.length - 1];
     return d + `L${son[0]} ${son[1]}`;
   }
   function yolEl(c) {
-    const p = document.createElementNS(SVG, 'path');
-    p.setAttribute('d', yolMetni(c.noktalar));
-    p.setAttribute('class', c.arac === 'fosforlu' ? 'fosforlu' : 'kalem');
-    p.style.stroke = renkDeger(c.renk);
-    p.style.strokeWidth = c.kalinlik;
-    p.dataset.id = c.id;
-    return p;
+    const noktalar = c.noktalar.map((p) => piksel(c, p)).filter(Boolean);
+    if (!noktalar.length) return null;
+    const t = document.createElementNS(SVG, 'path');
+    t.setAttribute('d', yolda(noktalar));
+    t.setAttribute('class', c.arac === 'fosforlu' ? 'fosforlu' : 'kalem');
+    t.style.stroke = renkDeger(c.renk);
+    t.style.strokeWidth = c.kalinlik;
+    t.dataset.id = c.id;
+    return t;
   }
   function ciz() {
-    katman.replaceChildren();
     const silinen = new Set(veri.silinen);
-    // Fosforlu altta, kalem üstte
-    const hepsi = [...veri.kaydedilen.filter((c) => !silinen.has(c.id)), ...veri.taslak];
-    hepsi.filter((c) => c.arac === 'fosforlu').forEach((c) => katman.append(yolEl(c)));
-    hepsi.filter((c) => c.arac !== 'fosforlu').forEach((c) => katman.append(yolEl(c)));
+    const kayitli = veri.kaydedilen.filter((c) => !silinen.has(c.id));
+    const taslak = veri.taslak;
+    const fosforluKayit = kayitli.filter((c) => c.arac === 'fosforlu');
+    const fosforluTaslak = taslak.filter((c) => c.arac === 'fosforlu');
+    const digerleri = [...kayitli.filter((c) => c.arac !== 'fosforlu'), ...taslak.filter((c) => c.arac !== 'fosforlu')];
+    // Kayıtlı fosforlu katman metnin altında; canlı taslak ve kalem metnin üstünde.
+    zeminKatman.replaceChildren(...fosforluKayit.map(yolEl).filter(Boolean));
+    katman.replaceChildren(...fosforluTaslak.map(yolEl).filter(Boolean), ...digerleri.map(yolEl).filter(Boolean));
   }
   const taslakVar = () => veri.taslak.length > 0 || veri.silinen.length > 0;
   const kaydetAyar = () => Depo.cizimYaz(partId, veri);
 
   /* Araç çubuğu */
   const cubuk = el('div', { class: 'arac', role: 'toolbar', 'aria-label': 'Çizim araçları' });
-  const kaydetBar = el('div', { class: 'arac', style: 'bottom:calc(env(safe-area-inset-bottom) + 5rem);gap:.6rem;padding:.55rem .8rem', hidden: true },
-    el('span', { style: 'font:600 .95rem var(--yazi-arayuz);padding:0 .3rem' }, 'Çizimler kaydedilsin mi?'),
-    el('button', { style: 'width:auto;border-radius:1rem;padding:0 1rem;font:700 .95rem var(--yazi-arayuz);border:1.5px solid var(--murekkep)', onclick: () => vazgec() }, 'Vazgeç'),
-    el('button', { style: 'width:auto;border-radius:1rem;padding:0 1.1rem;font:700 .95rem var(--yazi-arayuz);background:var(--arter);color:#fff', onclick: () => kaydet() }, 'Kaydet'));
+  const kaydetBar = el('div', { class: 'arac kaydet-bar', hidden: true },
+    el('span', {}, 'Çizimler kaydedilsin mi?'),
+    el('button', { class: 'vazgec-d', onclick: () => vazgec() }, 'Vazgeç'),
+    el('button', { class: 'kaydet-d', onclick: () => kaydet() }, 'Kaydet'));
   function cubukCiz() {
     const dugmeler = [];
     for (const [ad, yazi, i] of [['kalem', 'Kalem', IKON.kalem], ['fosforlu', 'Fosforlu kalem', IKON.fosforlu], ['silgi', 'Silgi', IKON.silgi]]) {
@@ -462,60 +595,95 @@ function kalemKatmani(partId, metin) {
   function vazgec() { veri.taslak = []; veri.silinen = []; kaydetAyar(); ciz(); cubukCiz(); }
 
   /* Çizim girdisi: yalnız kalem (ya da ?fare ile fare). Parmak kaydırır. */
-  const nokta = (e) => {
-    const r = metin.getBoundingClientRect();
-    return [Math.round(((e.clientX - r.left) / r.width) * VB * 10) / 10, Math.round(((e.clientY - r.top) / r.width) * VB * 10) / 10];
-  };
-  const cizebilir = (e) => e.pointerType === 'pen' || (fareIle && e.pointerType === 'mouse');
+  function capaNokta(e) {   // olay anında: öğe çapası + çapaya bağıl normalize konum
+    const t = e.target.closest ? e.target.closest(CAPA_SELC) : null;
+    const a = t || yuzey;
+    const yr = yuzey.getBoundingClientRect(), r = a.getBoundingClientRect();
+    const w = Math.max(r.width, 1), h = Math.max(r.height, 1);
+    return {
+      onak: a.getAttribute('data-ciz-onak') || 'y',
+      ax: (e.clientX - r.left) / w,
+      ay: (e.clientY - r.top) / h,
+    };
+  }
+  function nokta(e, c) {   // çapaya bağıl normalize nokta (0..1 öğe kutusu)
+    const r = kutu(c);
+    if (!r) return [0, 0];
+    const yr = yuzey.getBoundingClientRect();
+    return [(e.clientX - yr.left - r.x) / r.w, (e.clientY - yr.top - r.y) / r.h];
+  }
+  const cizebilir = (e) => (e.isPrimary !== false) && (e.pointerType === 'pen' || (fareIle && e.pointerType === 'mouse'));
   function siliciGec(e) {
-    const [x, y] = nokta(e);
+    const yr = yuzey.getBoundingClientRect();
+    const x = e.clientX - yr.left, y = e.clientY - yr.top;
     const silinen = new Set(veri.silinen);
-    veri.taslak = veri.taslak.filter((c) => !c.noktalar.some(([px, py]) => Math.hypot(px - x, py - y) < 14));
-    for (const c of veri.kaydedilen) {
-      if (!silinen.has(c.id) && c.noktalar.some(([px, py]) => Math.hypot(px - x, py - y) < 14)) veri.silinen.push(c.id);
-    }
+    const deg = (c) => c.noktalar.some((p) => { const q = piksel(c, p); return q && Math.hypot(q[0] - x, q[1] - y) < SILGI_YARI_CAP; });
+    veri.taslak = veri.taslak.filter((c) => !deg(c));
+    for (const c of veri.kaydedilen) if (!silinen.has(c.id) && deg(c)) veri.silinen.push(c.id);
     ciz();
   }
   function basla(e) {
     if (!cizebilir(e)) return;
     e.preventDefault();
-    metin.setPointerCapture(e.pointerId);
+    try { yuzey.setPointerCapture(e.pointerId); } catch {}
     if (arac === 'silgi') { aktifCizgi = 'silgi'; siliciGec(e); return; }
-    aktifCizgi = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), arac, renk: renk[arac], kalinlik: KALINLIK[arac], noktalar: [nokta(e)] };
+    const cap = capaNokta(e);
+    aktifCizgi = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), arac, renk: renk[arac], kalinlik: KALINLIK[arac],
+      onak: cap.onak, ax: cap.ax, ay: cap.ay, noktalar: [[0, 0]] };
+    aktifCizgi.noktalar[0] = nokta(e, aktifCizgi);
     veri.taslak.push(aktifCizgi); ciz();
   }
   function hareket(e) {
     if (!aktifCizgi || !cizebilir(e)) return;
     e.preventDefault();
-    const olaylar = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    let olaylar = [];
+    try { olaylar = e.getCoalescedEvents ? e.getCoalescedEvents() : []; } catch { olaylar = []; }
+    if (!olaylar.length) olaylar = [e];
     if (aktifCizgi === 'silgi') { olaylar.forEach(siliciGec); return; }
-    for (const o of olaylar.length ? olaylar : [e]) aktifCizgi.noktalar.push(nokta(o));
+    for (const o of olaylar) aktifCizgi.noktalar.push(nokta(o, aktifCizgi));
     ciz();
   }
   function bitis(e) {
     if (!aktifCizgi) return;
     aktifCizgi = null; kaydetAyar(); cubukCiz();
   }
-  metin.addEventListener('pointerdown', basla);
-  metin.addEventListener('pointermove', hareket);
-  metin.addEventListener('pointerup', bitis);
-  metin.addEventListener('pointercancel', bitis);
+  yuzey.addEventListener('pointerdown', basla);
+  yuzey.addEventListener('pointermove', hareket);
+  yuzey.addEventListener('pointerup', bitis);
+  yuzey.addEventListener('pointercancel', bitis);
   // Kalem dokunuşları sayfayı kaydırmasın; parmak kaydırmaya devam etsin
   const kalemTouch = (e) => { const t = e.touches[0]; if (t && t.touchType === 'stylus') e.preventDefault(); };
-  metin.addEventListener('touchstart', kalemTouch, { passive: false });
-  metin.addEventListener('touchmove', kalemTouch, { passive: false });
+  yuzey.addEventListener('touchstart', kalemTouch, { passive: false });
+  yuzey.addEventListener('touchmove', kalemTouch, { passive: false });
+
+  /* Apple Pencil Pro çift dokunuş (yerli katmandan 'pencilCiftDokun' olayı) → silgi */
+  let pencilSilgi = false;
+  const pencilCb = () => {
+    if (aktifCizgi === 'silgi' || arac === 'silgi') { arac = 'kalem'; pencilSilgi = false; }
+    else { arac = 'silgi'; pencilSilgi = true; }
+    cubukCiz();
+    const i = $('#arac-bilgi'); if (i) { i.textContent = arac === 'silgi' ? 'Silgi' : 'Kalem'; clearTimeout(i._t); i._t = setTimeout(() => { i.textContent = ''; }, 1600); }
+  };
+  addEventListener('pencilCiftDokun', pencilCb);
+  const kalemBitti = (e) => {   // çift dokunuş silgisinden, kalem kalkınca kaleme dön
+    if (!pencilSilgi || (e && e.pointerType && e.pointerType !== 'pen')) return;
+    arac = 'kalem'; pencilSilgi = false; cubukCiz();
+  };
+  addEventListener('pointerup', kalemBitti);
+  addEventListener('pointercancel', kalemBitti);
+  const bilgi = el('span', { id: 'arac-bilgi', class: 'arac-bilgi' });
+  document.body.append(bilgi);
 
   /* Dışarı çıkarken taslak varsa sor */
   function sor() {
     return new Promise((coz) => {
-      const arka = el('div', { style: 'position:fixed;inset:0;z-index:60;background:rgba(8,16,22,.55);display:grid;place-items:center;padding:1.5rem' });
-      const dugme = (yazi, deger, stil) => el('button', { style: `min-height:48px;border-radius:1rem;padding:0 1.2rem;font:700 1rem var(--yazi-arayuz);${stil}`, onclick: () => { arka.remove(); coz(deger); } }, yazi);
-      arka.append(el('div', { style: 'background:var(--kemik);color:var(--murekkep);border-radius:1.2rem;padding:1.4rem;max-width:22rem;width:100%;font-family:var(--yazi-arayuz)' },
-        el('h2', { style: 'font:700 1.25rem var(--yazi-baslik);margin:0 0 .5rem' }, 'Çizimler kaydedilsin mi?'),
-        el('p', { style: 'margin:0 0 1.2rem;color:var(--soluk);line-height:1.45' }, 'Kaydetmezsen bu oturumdaki çizimler silinir, part eski hâline döner.'),
-        el('div', { style: 'display:flex;gap:.6rem;justify-content:flex-end' },
-          dugme('Vazgeç, sil', 'sil', 'border:1.5px solid var(--murekkep);background:none;color:inherit'),
-          dugme('Kaydet', 'kaydet', 'border:0;background:var(--arter);color:#fff'))));
+      const arka = el('div', { class: 'soru-arka' });
+      arka.append(el('div', { class: 'soru-kut' },
+        el('h2', {}, 'Çizimler kaydedilsin mi?'),
+        el('p', {}, 'Kaydetmezsen bu oturumdaki çizimler silinir, part eski hâline döner.'),
+        el('div', { class: 'soru-dug' },
+          el('button', { class: 'ciz', onclick: () => { arka.remove(); coz('sil'); } }, 'Vazgeç, sil'),
+          el('button', { class: 'kaydet-d', onclick: () => { arka.remove(); coz('kaydet'); } }, 'Kaydet'))));
       document.body.append(arka);
     });
   }
@@ -526,10 +694,15 @@ function kalemKatmani(partId, metin) {
       if (c === 'kaydet') kaydet(); else vazgec();
       return true;
     },
-    kaldir() { ro.disconnect(); cubuk.remove(); kaydetBar.remove(); if (Esle.yenile === yenileFn) Esle.yenile = null; },
+    kaldir() {
+      ro.disconnect(); removeEventListener('orientationchange', don); removeEventListener('pencilCiftDokun', pencilCb);
+      removeEventListener('pointerup', kalemBitti); removeEventListener('pointercancel', kalemBitti);
+      cubuk.remove(); kaydetBar.remove(); bilgi.remove();
+      if (Esle.yenile === yenileFn) Esle.yenile = null;
+    },
   };
 }
 
-/* ---------- Tema (ayarlardan bağımsız, sistemle uyumlu) ---------- */
+/* ---------- Başlat ---------- */
 Esle.baslat();
 yonlendir();

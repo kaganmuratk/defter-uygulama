@@ -1,5 +1,5 @@
 name: IPA
-run-name: IPA derlemesi
+run-name: IPA derlemesi v0.3 (pencil çift dokunuş)
 on:
   workflow_dispatch:
 jobs:
@@ -14,7 +14,56 @@ jobs:
         run: |
           npx cap add ios
           cp assets/icon.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
-          npx cap sync ios
+      - name: Apple Pencil çift dokunuşu ekle (AppDelegate'a enjekte)
+        run: |
+          python3 - <<'PY'
+          import io
+          p = "ios/App/App/AppDelegate.swift"
+          s = io.open(p, encoding="utf-8").read()
+          # Capacitor 7'nin varsayılan AppDelegate'inde webView property'si yok.
+          # Kök CAPBridgeViewController'ı uygulama aktif olunca bulup Pencil'i bağla.
+          capa = "func applicationDidBecomeActive(_ application: UIApplication) {"
+          if capa not in s: raise SystemExit("çapa yok: applicationDidBecomeActive")
+          s = s.replace(capa, capa + "\n        PencilKoprusu.bagla(window)", 1)
+          s += """
+
+          // Apple Pencil (Pro/2) çift dokunuşu → JS olayı 'pencilCiftDokun' (app.js silgiye geçirir;
+          // kalem teması kalkınca app.js kaleme döner). KaganOS Defter 2026-10-29, Kağan'ın isteği.
+          final class PencilDinleyici: NSObject, UIPencilInteractionDelegate {
+              weak var webView: WKWebView?
+              func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+                  webView?.evaluateJavaScript("window.dispatchEvent(new Event('pencilCiftDokun'))", completionHandler: nil)
+              }
+          }
+
+          enum PencilKoprusu {
+              // UIPencilInteraction.delegate zayıf tutulur; dinleyiciyi burada canlı tut.
+              static var dinleyici: PencilDinleyici?
+
+              static func bagla(_ pencere: UIWindow?) {
+                  guard dinleyici == nil, let kok = bul(pencere?.rootViewController), let web = kok.webView else { return }
+                  let d = PencilDinleyici()
+                  d.webView = web
+                  let etkilesim = UIPencilInteraction()
+                  etkilesim.delegate = d
+                  web.addInteraction(etkilesim)
+                  dinleyici = d
+              }
+
+              private static func bul(_ vc: UIViewController?) -> CAPBridgeViewController? {
+                  guard let vc = vc else { return nil }
+                  if let kok = vc as? CAPBridgeViewController { return kok }
+                  for cocuk in vc.children {
+                      if let kok = bul(cocuk) { return kok }
+                  }
+                  return nil
+              }
+          }
+          """
+          io.open(p, "w", encoding="utf-8").write(s)
+          print("AppDelegate: Pencil çift dokunuş eklendi")
+          PY
+      - run: npx cap sync ios
       - name: Imzasız derle
         run: |
           xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos \
