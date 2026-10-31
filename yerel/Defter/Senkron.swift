@@ -27,7 +27,7 @@ final class Senkron: ObservableObject {
         ilerlemeKirli = true
         zamanla()
     }
-    func partKaydedildi(_ id: String) { kirliPartlar.insert(id); zamanla() }
+    func partKaydedildi(_ id: String) { if id.hasPrefix("k-") { return }; kirliPartlar.insert(id); zamanla() }
     private func zamanla() {
         zamanlayici?.cancel()
         zamanlayici = Task { try? await Task.sleep(nanoseconds: 2_500_000_000); if !Task.isCancelled { await hepsi() } }
@@ -39,7 +39,7 @@ final class Senkron: ObservableObject {
         let icerik = IcerikYonetici.ortak
         do {
             if ilerlemeKirli {
-                let govde = try JSONEncoder().encode(icerik.ilerleme)
+                let govde = try JSONEncoder().encode(icerik.ilerleme.filter { !$0.key.hasPrefix("k-") })   // kendi kitaplar yalnız cihazda
                 let d = try await Api.gonder("/sync/ilerleme", govde: govde)
                 if let u = try? JSONDecoder().decode([String: Ilerleme].self, from: d) { icerik.ilerlemeBirlestir(u) }
                 ilerlemeKirli = false

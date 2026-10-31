@@ -66,6 +66,7 @@ struct EkSayfa: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString
     var sonra: String          // hangi sayfanın ardından gelir (sayfa anahtarı)
     var cizgili: Bool = true
+    var desen: String?         // cizgili | kareli | noktali | duz (eski kayıtlarda yok)
 }
 
 // PDF içindeki her sayfanın anlamı. İçerik sayfası "b<i>", cevap sayfası "c<i>", eklenen sayfa "e<id>".

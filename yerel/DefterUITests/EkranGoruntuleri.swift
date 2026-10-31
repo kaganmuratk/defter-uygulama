@@ -103,4 +103,43 @@ final class EkranGoruntuleri: XCTestCase {
         sleep(2)
         cek("k5-okuyucu-dikey")
     }
+
+    // Kendi kitabını oluştur: kitap → bölüm → part → okuyucu
+    func testKendiKitap() throws {
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(app.buttons["yeniKitap"].waitForExistence(timeout: 15))
+        app.buttons["yeniKitap"].tap()
+        let alan = app.alerts.textFields.firstMatch
+        XCTAssertTrue(alan.waitForExistence(timeout: 5))
+        alan.typeText("Kimya")
+        cek("k1-kitap-adi")
+        app.alerts.buttons["Tamam"].tap()
+        let kitap = app.buttons["kitap-k"].exists ? app.buttons["kitap-k"] : app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'kitap-k-'")).firstMatch
+        XCTAssertTrue(kitap.waitForExistence(timeout: 5))
+        cek("k2-kutuphane")
+        kitap.tap()
+        XCTAssertTrue(app.buttons["bolumEkle"].waitForExistence(timeout: 5))
+        app.buttons["bolumEkle"].tap()
+        XCTAssertTrue(app.alerts.textFields.firstMatch.waitForExistence(timeout: 5))
+        app.alerts.buttons["Tamam"].tap()
+        XCTAssertTrue(app.buttons["bolum-1"].waitForExistence(timeout: 5))
+        cek("k3-bolum-eklendi")
+        app.buttons["bolum-1"].tap()
+        XCTAssertTrue(app.buttons["partEkle"].waitForExistence(timeout: 5))
+        app.buttons["partEkle"].tap()
+        let kareli = app.buttons["Kareli sayfa"]
+        XCTAssertTrue(kareli.waitForExistence(timeout: 5))
+        cek("k4-part-menusu")
+        kareli.tap()
+        XCTAssertTrue(app.alerts.textFields.firstMatch.waitForExistence(timeout: 5))
+        app.alerts.buttons["Tamam"].tap()
+        let part = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'k-'")).firstMatch
+        XCTAssertTrue(part.waitForExistence(timeout: 5))
+        cek("k5-part-eklendi")
+        part.tap()
+        XCTAssertTrue(app.buttons["geri"].waitForExistence(timeout: 10))
+        sleep(3)
+        cek("k6-okuyucu")
+    }
 }

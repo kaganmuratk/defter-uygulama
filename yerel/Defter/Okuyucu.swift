@@ -451,7 +451,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func ekSayfaYerlestir(_ ek: EkSayfa, belge: PDFDocument) {
         var hedef = belge.pageCount
         for i in 0..<belge.pageCount { if let p = belge.page(at: i), anahtarlar[ObjectIdentifier(p)] == ek.sonra { hedef = i + 1; break } }
-        let s = BosSayfa(desen: ek.cizgili ? .cizgili : .duz)
+        let s = BosSayfa(desen: BosSayfa.Desen(rawValue: ek.desen ?? "") ?? (ek.cizgili ? .cizgili : .duz))
         anahtarlar[ObjectIdentifier(s)] = "e" + ek.id
         belge.insert(s, at: hedef)
     }
@@ -459,6 +459,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         guard let doc = pdfView.document, let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
         var ek = EkSayfa(sonra: anahtar)
         ek.cizgili = desen != .duz
+        ek.desen = desen.rawValue
         let s = BosSayfa(desen: desen)
         anahtarlar[ObjectIdentifier(s)] = "e" + ek.id
         doc.insert(s, at: doc.index(for: p) + 1)
@@ -478,7 +479,22 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kirli = true; taslakPlanla(); paneliGuncelle()
     }
 
+
+    // MARK: Paylaş (çizimler sayfalara işlenmiş PDF)
+    private func paylas(_ kaynak: UIView) {
+        guard let doc = pdfView.document else { return }
+        for k in katmanlar.values { cizimiAl(k) }
+        guard let url = PdfPaylas.uret(belge: doc, cizimler: kayit.cizimler, anahtar: { [weak self] p in self?.anahtarlar[ObjectIdentifier(p)] }, ad: part.baslik) else {
+            bilgiGoster("PDF hazırlanamadı"); return
+        }
+        let a = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        a.popoverPresentationController?.sourceView = kaynak
+        a.popoverPresentationController?.sourceRect = kaynak.bounds
+        present(a, animated: true)
+    }
+
     // MARK: Yapışkan notlar
+
     private func notEkle() {
         guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
         let merkez = CGPoint(x: pdfView.bounds.midX, y: pdfView.bounds.midY)
@@ -570,6 +586,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             UIAction(title: "Noktalı sayfa ekle", image: UIImage(systemName: "circle.grid.3x3")) { [weak self] _ in self?.sayfaEkle(.noktali) },
             UIAction(title: "Düz sayfa ekle", image: UIImage(systemName: "doc")) { [weak self] _ in self?.sayfaEkle(.duz) },
             UIMenu(options: .displayInline, children: [
+                UIAction(title: "PDF olarak paylaş", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in self?.paylas(sayfaMenu) },
                 UIAction(title: "Notları gizle / göster", image: UIImage(systemName: "eye.slash")) { [weak self] _ in self?.notlariDegistir() },
                 UIAction(title: "Bu not sayfasını sil", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in self?.sayfaSil() },
             ]),
@@ -759,7 +776,7 @@ enum NotRenk {
 
 // Kullanıcının eklediği boş sayfa: desenli kâğıt (çizgili, kareli, noktalı, düz)
 final class BosSayfa: PDFPage {
-    enum Desen { case cizgili, kareli, noktali, duz }
+    enum Desen: String { case cizgili, kareli, noktali, duz }
     let desen: Desen
     init(desen: Desen) {
         self.desen = desen

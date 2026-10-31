@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Kitaplık: ana ekran (bölüm paneli + kitaplar) → kitap (bölümler) → bölüm (part'lar) → okuyucu (tam ekran).
 // Yatayda iki sütun, dikeyde tek sütun. Cam kartlar genel atmosfer görselinin üstünde durur.
@@ -92,6 +93,8 @@ struct KutuphaneEkrani: View {
     @State private var acikPart: (PartOzet, Part)?
     @State private var acikHedef: String?
     @State private var ayarAcik = false
+    @State private var adIstegi: AdIstegi?
+    @State private var silIstegi: SilIstegi?
 
     var body: some View {
         NavigationStack {
@@ -120,6 +123,7 @@ struct KutuphaneEkrani: View {
             .navigationDestination(for: BolumSecimi.self) { s in BolumEkrani(ders: s.ders, bolum: s.bolum, ac: ac) }
         }
         .sheet(isPresented: $ayarAcik) { AyarEkrani() }
+        .adSorusu($adIstegi).silOnayi($silIstegi)
         .fullScreenCover(isPresented: Binding(get: { acikPart != nil }, set: { if !$0 { acikPart = nil } })) {
             if let acik = acikPart {
                 OkuyucuEkrani(partOzet: acik.0, part: acik.1, kapat: { acikPart = nil; acikHedef = nil },
@@ -158,17 +162,24 @@ struct KutuphaneEkrani: View {
     }
 
     private var kitaplar: some View {
-        let dersler: [Ders] = icerik.plan?.dersler ?? []
+        let dersler: [Ders] = icerik.dersler
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Etiket(yazi: "Kitaplar")
                 Spacer()
-                Text("\(dersler.count) kitap").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+                Button { adIstegi = AdIstegi(baslik: "Yeni kitap", ilk: "") { icerik.kitapEkle($0) } } label: { EkleDugmesi(ad: "Yeni kitap") }
+                    .buttonStyle(.plain).accessibilityIdentifier("yeniKitap")
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 250), spacing: 24, alignment: .top)], alignment: .leading, spacing: 28) {
                 ForEach(Array(dersler.enumerated()), id: \.element.id) { i, d in
                     NavigationLink(value: d) { KitapKarti(ders: d, sira: i) }
                         .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
+                        .contextMenu {
+                            if d.id.hasPrefix("k-") {
+                                Button { adIstegi = AdIstegi(baslik: "Kitabın adı", ilk: d.baslik) { icerik.kitapAdi(d.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+                                Button(role: .destructive) { silIstegi = SilIstegi(ad: d.baslik) { icerik.kitapSil(d.id) } } label: { Label("Sil", systemImage: "trash") }
+                            }
+                        }
                 }
             }
         }
@@ -179,7 +190,7 @@ struct KutuphaneEkrani: View {
         guard o.hazir, let p = icerik.part(o.id) else { return }
         acikPart = (o, p)
     }
-    private func partOzet(_ id: String) -> PartOzet? { icerik.plan?.dersler.flatMap { $0.bolumler.flatMap { $0.partlar } }.first { $0.id == id } }
+    private func partOzet(_ id: String) -> PartOzet? { icerik.ozetBul(id) }
 }
 
 struct KitapKarti: View {
@@ -267,8 +278,13 @@ struct CamSartli: ViewModifier {
 
 struct KitapEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
-    let ders: Ders
+    private let ilk: Ders
     let ac: (PartOzet) -> Void
+    @State private var adIstegi: AdIstegi?
+    @State private var silIstegi: SilIstegi?
+    init(ders: Ders, ac: @escaping (PartOzet) -> Void) { ilk = ders; self.ac = ac }
+    private var ders: Ders { icerik.dersler.first { $0.id == ilk.id } ?? ilk }   // kendi kitaplar değişince güncel hâli
+    private var kendi: Bool { ilk.id.hasPrefix("k-") }
     var body: some View {
         GeometryReader { g in
             let genis = g.size.width > 900
@@ -293,6 +309,7 @@ struct KitapEkrani: View {
         .background(Atmosfer())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .adSorusu($adIstegi).silOnayi($silIstegi)
     }
 
     private func sol(biten: Int, toplam: Int) -> some View {
@@ -324,11 +341,22 @@ struct KitapEkrani: View {
             HStack {
                 Etiket(yazi: "Bölümler")
                 Spacer()
-                Text("\(ders.bolumler.count) bölüm").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+                if kendi {
+                    Button { adIstegi = AdIstegi(baslik: "Yeni bölüm", ilk: "Bölüm \((ders.bolumler.map { $0.no }.max() ?? 0) + 1)") { icerik.bolumEkle(ders.id, $0) } } label: { EkleDugmesi(ad: "Bölüm ekle") }
+                        .buttonStyle(.plain).accessibilityIdentifier("bolumEkle")
+                } else {
+                    Text("\(ders.bolumler.count) bölüm").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+                }
             }
             ForEach(ders.bolumler) { b in
                 NavigationLink(value: BolumSecimi(ders: ders, bolum: b)) { BolumSatiri(bolum: b, vurgulu: b.no == devamNo) }
                     .buttonStyle(.plain).accessibilityIdentifier("bolum-\(b.no)")
+                    .contextMenu {
+                        if kendi {
+                            Button { adIstegi = AdIstegi(baslik: "Bölümün adı", ilk: b.baslik) { icerik.bolumAdi(ders.id, b.no, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+                            Button(role: .destructive) { silIstegi = SilIstegi(ad: b.baslik) { icerik.bolumSil(ders.id, b.no) } } label: { Label("Sil", systemImage: "trash") }
+                        }
+                    }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -364,13 +392,41 @@ struct BolumSatiri: View {
 
 struct BolumEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
-    let ders: Ders; let bolum: Bolum
+    private let ilkDers: Ders, ilkBolum: Bolum
     let ac: (PartOzet) -> Void
+    @State private var adIstegi: AdIstegi?
+    @State private var silIstegi: SilIstegi?
+    @State private var pdfSec = false
+    init(ders: Ders, bolum: Bolum, ac: @escaping (PartOzet) -> Void) { ilkDers = ders; ilkBolum = bolum; self.ac = ac }
+    private var ders: Ders { icerik.dersler.first { $0.id == ilkDers.id } ?? ilkDers }
+    private var bolum: Bolum { ders.bolumler.first { $0.no == ilkBolum.no } ?? ilkBolum }
+    private var kendi: Bool { ilkDers.id.hasPrefix("k-") }
+
+    private func yeniPart(_ desen: String) {
+        adIstegi = AdIstegi(baslik: "Yeni part", ilk: "Part \((bolum.partlar.map { $0.no }.max() ?? 0) + 1)") { icerik.partEkle(ders.id, bolum.no, ad: $0, desen: desen) }
+    }
+    private func pdfAl(_ sonuc: Result<[URL], Error>) {
+        guard case .success(let l) = sonuc, let u = l.first else { return }
+        let eris = u.startAccessingSecurityScopedResource()
+        defer { if eris { u.stopAccessingSecurityScopedResource() } }
+        icerik.partEkle(ders.id, bolum.no, ad: u.deletingPathExtension().lastPathComponent, pdf: u)
+    }
+    private var ekleMenusu: some View {
+        Menu {
+            Button { yeniPart("cizgili") } label: { Label("Çizgili sayfa", systemImage: "line.3.horizontal") }
+            Button { yeniPart("kareli") } label: { Label("Kareli sayfa", systemImage: "squareshape.split.3x3") }
+            Button { yeniPart("noktali") } label: { Label("Noktalı sayfa", systemImage: "circle.grid.3x3") }
+            Button { yeniPart("duz") } label: { Label("Düz sayfa", systemImage: "doc") }
+            Divider()
+            Button { pdfSec = true } label: { Label("PDF içe aktar", systemImage: "square.and.arrow.down") }
+        } label: { EkleDugmesi(ad: "Part ekle") }
+        .accessibilityIdentifier("partEkle")
+    }
     var body: some View {
         let biten = bolum.partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                HStack { GeriDugmesi(ad: ders.baslik); Spacer() }
+                HStack { GeriDugmesi(ad: ders.baslik); Spacer(); if kendi { ekleMenusu } }
                 HStack(alignment: .bottom, spacing: 26) {
                     Text("\(bolum.no)").font(Tema.baslik(120, .ultraLight)).foregroundStyle(Tema.soluk).minimumScaleFactor(0.5)
                     VStack(alignment: .leading, spacing: 8) {
@@ -380,7 +436,15 @@ struct BolumEkrani: View {
                     }
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 16, alignment: .top)], spacing: 16) {
-                    ForEach(bolum.partlar) { p in PartKarti(part: p, ac: ac) }
+                    ForEach(bolum.partlar) { p in
+                        PartKarti(part: p, ac: ac)
+                            .contextMenu {
+                                if kendi {
+                                    Button { adIstegi = AdIstegi(baslik: "Part'ın adı", ilk: p.baslik) { icerik.partAdi(ders.id, bolum.no, p.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+                                    Button(role: .destructive) { silIstegi = SilIstegi(ad: p.baslik) { icerik.partSil(ders.id, bolum.no, p.id) } } label: { Label("Sil", systemImage: "trash") }
+                                }
+                            }
+                    }
                 }
             }
             .padding(.horizontal, 54).padding(.vertical, 30)
@@ -388,6 +452,8 @@ struct BolumEkrani: View {
         .background(Atmosfer())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .adSorusu($adIstegi).silOnayi($silIstegi)
+        .fileImporter(isPresented: $pdfSec, allowedContentTypes: [.pdf], onCompletion: pdfAl)
     }
 }
 
@@ -405,7 +471,7 @@ struct PartKarti: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(part.baslik).font(Tema.baslik(21, .semibold)).multilineTextAlignment(.leading)
                     if let n = PartBilgisi.bolumSayisi(part.id) {
-                        Text("\(n) bölüm başlığı").font(Tema.yazi(12.5)).foregroundStyle(bu ? Tema.kartYazi.opacity(0.65) : Tema.soluk)
+                        Text(part.id.hasPrefix("k-") ? "\(n) sayfa" : "\(n) bölüm başlığı").font(Tema.yazi(12.5)).foregroundStyle(bu ? Tema.kartYazi.opacity(0.65) : Tema.soluk)
                     }
                 }
                 Spacer(minLength: 8)

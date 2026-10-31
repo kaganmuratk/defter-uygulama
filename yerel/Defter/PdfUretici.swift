@@ -19,6 +19,7 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
     private var surecler: [String: Task<(PDFDocument, [SayfaBilgi])?, Never>] = [:]
 
     func belge(_ part: Part) async -> (PDFDocument, [SayfaBilgi])? {
+        if part.id.hasPrefix("k-") { return KendiDepo.belge(part) }
         if let s = surecler[part.id] { return await s.value }
         let t = Task { await self.uret(part) }
         surecler[part.id] = t

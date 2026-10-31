@@ -39,6 +39,7 @@ enum Api {
 final class IcerikYonetici: ObservableObject {
     static let ortak = IcerikYonetici()
     @Published var plan: Plan?
+    @Published var kendi: [Ders] = []            // kullanıcının kendi kitapları (Kendi.swift)
     @Published var ilerleme: [String: Ilerleme] = [:]
     @Published var indirme: String = ""          // Ayarlar'da gösterilen çevrimdışı kopya durumu
     @Published var anahtarGerekli = false
@@ -47,15 +48,19 @@ final class IcerikYonetici: ObservableObject {
 
     init() {
         if Ayar.ornek { plan = Ornek.plan; anahtarGerekli = false; return }
+        kendi = Depo.oku([Ders].self, KendiDepo.kitapURL) ?? []
         plan = Depo.oku(Plan.self, Depo.icerik.appendingPathComponent("plan.json"))
         ilerleme = Depo.oku([String: Ilerleme].self, Depo.kok.appendingPathComponent("ilerleme.json")) ?? [:]
         anahtarGerekli = Ayar.anahtar.isEmpty
     }
 
     func part(_ id: String) -> Part? {
+        if let o = ozetBul(id), id.hasPrefix("k-") { return KendiDepo.part(id, no: o.no, baslik: o.baslik) }
         if Ayar.ornek { return Ornek.part(id) }
         return Depo.oku(Part.self, Depo.icerik.appendingPathComponent(id + ".json"))
     }
+
+    func ozetBul(_ id: String) -> PartOzet? { dersler.flatMap { $0.bolumler.flatMap { $0.partlar } }.first { $0.id == id } }
 
     // Plan + bütün partlar + görseller. Var olan kopya hemen kullanılır; ağ hatası içeriği bozmaz.
     func indir() async {
