@@ -1,10 +1,11 @@
 import SwiftUI
 
 // Kitaplık: kitaplar → bölümler → partlar. Part açılınca okuyucu tam ekran gelir.
-// Yatayda iki sütun: solda "kaldığın yer" + istatistik, sağda kitaplar ve son notlar (kenarlar boş kalmasın).
+// Yatayda iki sütun: solda "kaldığın yer", sağda kitaplar ve son notlar (kenarlar boş kalmasın).
 struct KutuphaneEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
     @State private var acikPart: (PartOzet, Part)?
+    @State private var acikHedef: String?
     @State private var ayarAcik = false
     @State private var ozet = Ozet()
 
@@ -16,11 +17,11 @@ struct KutuphaneEkrani: View {
                     Group {
                         if genis {
                             HStack(alignment: .top, spacing: 44) {
-                                VStack(alignment: .leading, spacing: 28) { ust; devamBolumu; istatistik }.frame(width: min(440, g.size.width * 0.4))
+                                VStack(alignment: .leading, spacing: 28) { ust; devamBolumu }.frame(width: min(440, g.size.width * 0.4))
                                 VStack(alignment: .leading, spacing: 28) { kitaplar; sonNotlar }
                             }
                         } else {
-                            VStack(alignment: .leading, spacing: 28) { ust; devamBolumu; istatistik; kitaplar; sonNotlar }
+                            VStack(alignment: .leading, spacing: 28) { ust; devamBolumu; kitaplar; sonNotlar }
                         }
                     }
                     .padding(.horizontal, genis ? 48 : 28).padding(.top, 8).padding(.bottom, 40)
@@ -43,7 +44,12 @@ struct KutuphaneEkrani: View {
         .sheet(isPresented: $ayarAcik) { AyarEkrani() }
         .fullScreenCover(isPresented: Binding(get: { acikPart != nil }, set: { if !$0 { acikPart = nil } })) {
             if let acik = acikPart {
-                OkuyucuEkrani(partOzet: acik.0, part: acik.1) { acikPart = nil }.ignoresSafeArea(.container, edges: .bottom)
+                OkuyucuEkrani(partOzet: acik.0, part: acik.1, kapat: { acikPart = nil; acikHedef = nil },
+                              atla: { id, hedef in
+                                  guard let o = partOzet(id), let p = icerik.part(id) else { return }
+                                  acikHedef = hedef; acikPart = (o, p)
+                              }, hedef: acikHedef)
+                    .id(acik.1.id).ignoresSafeArea(.container, edges: .bottom)
             }
         }
     }
@@ -65,14 +71,6 @@ struct KutuphaneEkrani: View {
                 ProgressView()
                 Text(icerik.hata ?? "İçerik indiriliyor…").foregroundStyle(Tema.soluk)
             }
-        }
-    }
-
-    private var istatistik: some View {
-        HStack(spacing: 12) {
-            IstatistikKutusu(sayi: "\(ozet.bitenPart)", ust: "/\(ozet.toplamPart)", ad: "Biten part")
-            IstatistikKutusu(sayi: "\(ozet.notSayisi)", ust: nil, ad: "Yapışkan not")
-            IstatistikKutusu(sayi: "\(ozet.cizilenSayfa)", ust: nil, ad: "Notlu sayfa")
         }
     }
 

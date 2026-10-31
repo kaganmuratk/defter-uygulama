@@ -9,7 +9,7 @@ import CryptoKit
 @MainActor
 final class PdfUretici: NSObject, WKNavigationDelegate {
     static let ortak = PdfUretici()
-    static let stilSurumu = "3"
+    static let stilSurumu = "4"
     nonisolated static let kagit: CGFloat = 800, solPay: CGFloat = 48, ustPay: CGFloat = 44, altPay: CGFloat = 64
     nonisolated static var sayfaGenislik: CGFloat { kagit + 2 * solPay }
     nonisolated static let enAzYukseklik: CGFloat = 1150   // kısa bölümlerde altta not alacak yer kalsın
@@ -62,12 +62,51 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
                 yuklendi = c
                 web.loadFileURL(dosya, allowingReadAccessTo: Depo.icerik)
             }
-            let js = """
+            let js = #"""
             await document.fonts.ready;
-            await Promise.all([...document.images].map(g => g.complete ? 0 : new Promise(r => { g.onload = g.onerror = r; })));
-            return Math.ceil(document.querySelector('.kagit').getBoundingClientRect().bottom);
-            """
-            let alt = (try? await web.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)) as? Double ?? 1000
+            await Promise.all([...document.images].map(async g => {
+                if (!g.complete) await new Promise(r => { g.onload = g.onerror = r; });
+                try { await g.decode(); } catch (e) {}
+            }));
+            const kok = document.querySelector('.kagit');
+            const re = /(Şekil|Tablo) (\d+\.\d+[a-z]?)/g;
+            const w = document.createTreeWalker(kok, NodeFilter.SHOW_TEXT);
+            const dugumler = [];
+            while (w.nextNode()) dugumler.push(w.currentNode);
+            for (const d of dugumler) {
+                if (d.parentElement.closest('h1,h2,h3,h4,.ref')) continue;
+                const t = d.nodeValue; re.lastIndex = 0;
+                if (!re.test(t)) continue;
+                re.lastIndex = 0;
+                const f = document.createDocumentFragment(); let son = 0, m;
+                while ((m = re.exec(t))) {
+                    f.append(t.slice(son, m.index));
+                    const s = document.createElement('span'); s.className = 'ref'; s.textContent = m[0]; f.append(s);
+                    son = m.index + m[0].length;
+                }
+                f.append(t.slice(son)); d.replaceWith(f);
+            }
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const atiflar = [...document.querySelectorAll('.ref')].flatMap(s => [...s.getClientRects()].map(r => ({ ad: s.textContent, x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height })));
+            const hedefler = {};
+            document.querySelectorAll('img').forEach(g => {
+                const m = /sekil-(\d+)-(\d+)([a-z]?)/.exec(g.getAttribute('src') || ''); if (!m) return;
+                const y = g.getBoundingClientRect().top + scrollY, ad = 'Şekil ' + m[1] + '.' + m[2];
+                if (m[3]) hedefler[ad + m[3]] = y;
+                if (!(ad in hedefler)) hedefler[ad] = y;
+            });
+            document.querySelectorAll('h2,h3,h4').forEach(h => {
+                const m = /^(Tablo \d+\.\d+)/.exec(h.textContent.trim());
+                if (m) hedefler[m[1]] = h.getBoundingClientRect().top + scrollY;
+            });
+            return JSON.stringify({ alt: Math.ceil(kok.getBoundingClientRect().bottom), atiflar, hedefler });
+            """#
+            struct Olcum: Decodable { var alt: Double; var atiflar: [Atif]; var hedefler: [String: Double] }
+            let ham = (try? await web.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)) as? String
+            let olcum = ham.flatMap { try? JSONDecoder().decode(Olcum.self, from: Data($0.utf8)) }
+            let alt = olcum?.alt ?? 1000
+            var bilgi = bilgi
+            bilgi.atiflar = olcum?.atiflar; bilgi.hedefler = olcum?.hedefler
             let yukseklik = max(Self.enAzYukseklik, CGFloat(alt) + Self.altPay)
             web.frame = CGRect(x: web.frame.origin.x, y: 0, width: Self.sayfaGenislik, height: yukseklik)
             let cfg = WKPDFConfiguration()
@@ -130,6 +169,7 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
         @font-face { font-family: "Figtree"; font-weight: 300 900; src: url("figtree-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
         * { box-sizing: border-box; }
         html, body { margin: 0; background: transparent; color: #15151c; -webkit-text-size-adjust: 100%; }
+        .ref { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: currentColor; }
         .kagit { width: \(Int(kagit))px; margin: \(Int(ustPay))px \(Int(solPay))px 0; font: 400 21px/1.7 "Figtree", -apple-system, sans-serif; letter-spacing: .002em; }
         h1 { font: 800 2.55em/1.12 "Figtree"; letter-spacing: -.03em; margin: 0 0 1.6rem; }
         h2 { font: 700 1.4rem/1.25 "Figtree"; letter-spacing: -.02em; margin: 2.2rem 0 .8rem; }

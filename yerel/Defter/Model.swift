@@ -73,6 +73,12 @@ struct SayfaBilgi: Codable, Hashable {
     var anahtar: String
     var baslik: String
     var bolumSira: Int?        // web uyumlu ilerleme için bölüm sırası
+    var atiflar: [Atif]?       // sayfadaki "Şekil 1.3" / "Tablo 1.1" gibi dokunulur atıflar (sayfa üstünden px)
+    var hedefler: [String: Double]?   // bu sayfadaki şekil/tablolar: ad → üstten uzaklık (px)
+}
+struct Atif: Codable, Hashable {
+    var ad: String
+    var x: Double, y: Double, w: Double, h: Double
 }
 
 enum Zaman { static var simdi: Double { Date().timeIntervalSince1970 * 1000 } }
