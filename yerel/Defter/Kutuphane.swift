@@ -5,9 +5,10 @@ import SwiftUI
 
 struct BolumSecimi: Hashable { let ders: Ders; let bolum: Bolum }
 
-// "Kalınan yer": yarım kalan en son part; yoksa sıradaki başlanmamış part
+// "Kalınan yer": yalnız okuyucuda "Burada kaldım" ile elle işaretlenen part. İşaret yoksa kalınan yer gösterilmez;
+// panel, bitmemiş ilk bölümü açar.
 struct DevamYeri {
-    let part: PartOzet
+    let part: PartOzet?
     let ders: Ders
     let bolum: Bolum
     let yarim: Bool
@@ -16,11 +17,12 @@ struct DevamYeri {
         guard let plan = icerik.plan else { return nil }
         var tum: [DevamYeri] = []
         for d in plan.dersler { for b in d.bolumler { for p in b.partlar where p.hazir { tum.append(DevamYeri(part: p, ders: d, bolum: b, yarim: false)) } } }
-        let yarimlar = tum.filter { icerik.ilerleme[$0.part.id]?.durum == "yarim" }
-        if let y = yarimlar.max(by: { (icerik.ilerleme[$0.part.id]?.guncelleme ?? 0) < (icerik.ilerleme[$1.part.id]?.guncelleme ?? 0) }) {
+        let yarimlar = tum.filter { icerik.ilerleme[$0.part?.id ?? ""]?.durum == "yarim" }
+        if let y = yarimlar.max(by: { (icerik.ilerleme[$0.part?.id ?? ""]?.guncelleme ?? 0) < (icerik.ilerleme[$1.part?.id ?? ""]?.guncelleme ?? 0) }) {
             return DevamYeri(part: y.part, ders: y.ders, bolum: y.bolum, yarim: true)
         }
-        return tum.first { icerik.ilerleme[$0.part.id]?.durum != "bitti" } ?? tum.first
+        guard let ilk = tum.first(where: { icerik.ilerleme[$0.part?.id ?? ""]?.durum != "bitti" }) ?? tum.first else { return nil }
+        return DevamYeri(part: nil, ders: ilk.ders, bolum: ilk.bolum, yarim: false)
     }
 }
 
@@ -221,11 +223,10 @@ struct BolumPaneli: View {
 
     private func satir(_ p: PartOzet) -> some View {
         let durum = icerik.ilerleme[p.id]?.durum
-        let bu = p.id == devam.part.id
-        let daireDurumu: String? = (bu && devam.yarim) ? "yarim" : durum
+        let bu = p.id == devam.part?.id
         return Button { ac(p) } label: {
             HStack(spacing: 16) {
-                DurumDairesi(durum: daireDurumu, no: p.no, boy: 32, vurgulu: bu)
+                DurumDairesi(durum: durum, no: p.no, boy: 32, vurgulu: bu)
                 Text(p.baslik).font(Tema.baslik(19, .medium)).multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 satirSonu(p, durum: durum, bu: bu)
@@ -243,7 +244,7 @@ struct BolumPaneli: View {
     @ViewBuilder private func satirSonu(_ p: PartOzet, durum: String?, bu: Bool) -> some View {
         if bu {
             HStack(spacing: 4) {
-                Text(devam.yarim ? "kalınan yer" : "sıradaki")
+                Text("kalınan yer")
                 Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
             }
             .font(Tema.yazi(12.5, .bold)).foregroundStyle(Tema.vurgu)

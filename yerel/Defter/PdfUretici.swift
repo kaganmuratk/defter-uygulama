@@ -27,6 +27,15 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
         return r
     }
 
+    /// Önbelleği boş partların PDF'lerini sırayla, okuyucu kapalıyken hazırlar (açılış akıcı olsun).
+    func hepsiniHazirla(_ partlar: [Part]) async {
+        for p in partlar {
+            while Senkron.ortak.acikPart != nil { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            _ = await belge(p)
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+    }
+
     private func ozet(_ part: Part) -> String {
         let d = (try? JSONEncoder().encode(part)) ?? Data()
         return SHA256.hash(data: d + Data(Self.stilSurumu.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16).description

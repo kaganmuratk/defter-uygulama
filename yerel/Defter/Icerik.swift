@@ -84,6 +84,9 @@ final class IcerikYonetici: ObservableObject {
             }
             indirme = "\(hazirPart)/\(partlar.count) part, \(gorsel)/\(gorselToplam) görsel cihazda"
             UserDefaults.standard.set(indirme, forKey: "indirme")
+            // Part'lar açılışta takılmasın diye PDF'ler arka planda önceden hazırlanır
+            let hazirlanacak = partlar.compactMap { part($0.id) }
+            Task(priority: .utility) { await PdfUretici.ortak.hepsiniHazirla(hazirlanacak) }
         } catch ApiHatasi.yetkisiz {
             anahtarGerekli = true; hata = "Anahtar kabul edilmedi."
         } catch {

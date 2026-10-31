@@ -42,6 +42,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private var aracDegisimOncesi: PKTool?
     private var gecerliArac: PKTool = PKInkingTool(.pen, color: .label, width: 3)
 
+    private lazy var kaldimDugmesi = ikonDugme("bookmark", ad: "Burada kaldım") { [weak self] in self?.kaldimDegistir() }
     private lazy var kaydetDugmesi = ustDugme("Kaydet", sembol: nil) { [weak self] in self?.kaydet() }
 
     init(partOzet: PartOzet, part: Part) {
@@ -66,6 +67,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kurUstCubuk()
         kurPanel()
         kurPdf()
+        kurBitirDugmesi()
+        kaldimDugmesiniGuncelle()
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (k: OkuyucuKontrol, _: UITraitCollection) in
             k.pilKenarlari()
         }
@@ -81,12 +84,14 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         toolPicker.selectedTool = gecerliArac
         if #available(iOS 18.0, *) { toolPicker.showsDrawingPolicyControls = false }
         Senkron.ortak.acikPart = part.id
-        Task { await yukle() }
     }
 
+    private var yukleBasladi = false
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         paletiGoster(paletAcik)
+        // Part'ı açarken kayma animasyonu akıcı olsun diye PDF yükleme animasyon bittikten sonra başlar
+        if !yukleBasladi { yukleBasladi = true; Task { try? await Task.sleep(nanoseconds: 120_000_000); await yukle() } }
     }
 
     // MARK: Yükleme
@@ -158,7 +163,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         ])
         v.clipsToBounds = true
         panel.baslik = part.baslik
-        panel.ust = "Part \(part.no)\(part.kitap.map { " · " + $0 } ?? "")"
+        panel.ust = ""
         panel.git = { [weak self] anahtar in self?.sayfayaGit(anahtar) }
         panel.notAc = { [weak self] id in
             guard let self, let n = self.kayit.notlar.first(where: { $0.id == id }) else { return }
@@ -314,12 +319,61 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
         panel.secili = anahtar
         guard let b = sayfalar.first(where: { $0.anahtar == anahtar }), let sira = b.bolumSira else { return }
+        // Yalnız konum tutulur; "kalınan yer" ve "bitti" yalnız kullanıcı işaretleyince değişir
         IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in
             i.sayfa = sira
             var z = Set(i.ziyaret ?? []); z.insert(sira); i.ziyaret = Array(z).sorted()
-            // Son bölüme (ve cevaplarına) gelince part kendiliğinden "bitti" sayılır
-            if i.durum != "bitti" { i.durum = sira >= self.part.bolumler.count - 1 ? "bitti" : "yarim" }
         }
+        sonSayfadami = sira >= part.bolumler.count - 1
+        bitirDugmesiniGuncelle()
+    }
+
+    // MARK: Kalınan yer ve bitti işareti (yalnız elle)
+    private var sonSayfadami = false
+    private let bitirDugmesi = UIButton(type: .system)
+    private var durum: String? { IcerikYonetici.ortak.ilerleme[part.id]?.durum }
+
+    private func kaldimDegistir() {
+        let simdi = durum == "yarim"
+        IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = simdi ? nil : "yarim" }
+        bilgiGoster(simdi ? "Kalınan yer kaldırıldı" : "Kalınan yer işaretlendi")
+        kaldimDugmesiniGuncelle()
+    }
+    private func bitirDegistir() {
+        let bitti = durum == "bitti"
+        IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = bitti ? nil : "bitti" }
+        bilgiGoster(bitti ? "Bitti işareti kaldırıldı" : "Part bitti olarak işaretlendi")
+        bitirDugmesiniGuncelle(); kaldimDugmesiniGuncelle()
+    }
+    private func kaldimDugmesiniGuncelle() {
+        let dolu = durum == "yarim"
+        kaldimDugmesi.setImage(UIImage(systemName: dolu ? "bookmark.fill" : "bookmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
+        kaldimDugmesi.toolTip = dolu ? "Kalınan yeri kaldır" : "Burada kaldım"
+    }
+    private func kurBitirDugmesi() {
+        var c = UIButton.Configuration.filled()
+        c.cornerStyle = .capsule
+        c.baseBackgroundColor = Tema.dolguUI; c.baseForegroundColor = Tema.dolguUstuUI
+        c.contentInsets = NSDirectionalEdgeInsets(top: 13, leading: 24, bottom: 13, trailing: 24)
+        bitirDugmesi.configuration = c
+        bitirDugmesi.translatesAutoresizingMaskIntoConstraints = false
+        bitirDugmesi.alpha = 0; bitirDugmesi.isHidden = true
+        bitirDugmesi.accessibilityIdentifier = "bitiriDugmesi"
+        bitirDugmesi.addAction(UIAction { [weak self] _ in self?.bitirDegistir() }, for: .touchUpInside)
+        view.addSubview(bitirDugmesi)
+        NSLayoutConstraint.activate([
+            bitirDugmesi.centerXAnchor.constraint(equalTo: pdfView.centerXAnchor),
+            bitirDugmesi.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -22),
+        ])
+    }
+    private func bitirDugmesiniGuncelle() {
+        guard var c = bitirDugmesi.configuration else { return }
+        let bitti = durum == "bitti"
+        c.attributedTitle = AttributedString(bitti ? "Bitti · işareti kaldır" : "Bitti olarak işaretle", attributes: AttributeContainer([.font: Tema.uiArayuz(15, 700)]))
+        bitirDugmesi.configuration = c
+        let goster = sonSayfadami
+        if goster { bitirDugmesi.isHidden = false }
+        UIView.animate(withDuration: 0.25, animations: { self.bitirDugmesi.alpha = goster ? 1 : 0 }) { _ in if !goster { self.bitirDugmesi.isHidden = true } }
     }
 
     // MARK: Şekil / tablo atıfları
@@ -523,8 +577,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
         kirli = false
 
-        let sol = UIStackView(arrangedSubviews: [geri, panelDugme, baslikEtiket]); sol.spacing = 8; sol.alignment = .center
-        let sag = UIStackView(arrangedSubviews: [sayfaMenu, not, kalem, kaydetDugmesi]); sag.spacing = 6; sag.alignment = .center
+        let sol = UIStackView(arrangedSubviews: [geri, panelDugme]); sol.spacing = 6; sol.alignment = .center
+        let sag = UIStackView(arrangedSubviews: [kaldimDugmesi, sayfaMenu, not, kalem, kaydetDugmesi]); sag.spacing = 6; sag.alignment = .center
         let pilSol = camPil(sol), pilSag = camPil(sag)
         pilKapsayicilar = [pilSol, pilSag]
         for v in [pilSol, pilSag] { v.translatesAutoresizingMaskIntoConstraints = false; ustCubuk.addSubview(v) }
