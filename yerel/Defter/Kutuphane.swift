@@ -405,8 +405,8 @@ struct BolumEkrani: View {
     private func yeniPart(_ desen: String) {
         adIstegi = AdIstegi(baslik: "Yeni part", ilk: "Part \((bolum.partlar.map { $0.no }.max() ?? 0) + 1)") { icerik.partEkle(ders.id, bolum.no, ad: $0, desen: desen) }
     }
-    private func pdfAl(_ sonuc: Result<[URL], Error>) {
-        guard case .success(let l) = sonuc, let u = l.first else { return }
+    private func pdfAl(_ sonuc: Result<URL, Error>) {
+        guard case .success(let u) = sonuc else { return }
         let eris = u.startAccessingSecurityScopedResource()
         defer { if eris { u.stopAccessingSecurityScopedResource() } }
         icerik.partEkle(ders.id, bolum.no, ad: u.deletingPathExtension().lastPathComponent, pdf: u)
