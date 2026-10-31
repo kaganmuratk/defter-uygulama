@@ -1,46 +1,122 @@
 import SwiftUI
 
-// Kitaplık: kitaplar → bölümler → partlar. Part açılınca okuyucu tam ekran gelir.
-// Yatayda iki sütun: solda "kaldığın yer", sağda kitaplar ve son notlar (kenarlar boş kalmasın).
+// Kitaplık: ana ekran (bölüm paneli + kitaplar) → kitap (bölümler) → bölüm (part'lar) → okuyucu (tam ekran).
+// Yatayda iki sütun, dikeyde tek sütun. Cam kartlar genel atmosfer görselinin üstünde durur.
+
+struct BolumSecimi: Hashable { let ders: Ders; let bolum: Bolum }
+
+// "Kalınan yer": yarım kalan en son part; yoksa sıradaki başlanmamış part
+struct DevamYeri {
+    let part: PartOzet
+    let ders: Ders
+    let bolum: Bolum
+    let yarim: Bool
+
+    @MainActor static func bul(_ icerik: IcerikYonetici) -> DevamYeri? {
+        guard let plan = icerik.plan else { return nil }
+        var tum: [DevamYeri] = []
+        for d in plan.dersler { for b in d.bolumler { for p in b.partlar where p.hazir { tum.append(DevamYeri(part: p, ders: d, bolum: b, yarim: false)) } } }
+        let yarimlar = tum.filter { icerik.ilerleme[$0.part.id]?.durum == "yarim" }
+        if let y = yarimlar.max(by: { (icerik.ilerleme[$0.part.id]?.guncelleme ?? 0) < (icerik.ilerleme[$1.part.id]?.guncelleme ?? 0) }) {
+            return DevamYeri(part: y.part, ders: y.ders, bolum: y.bolum, yarim: true)
+        }
+        return tum.first { icerik.ilerleme[$0.part.id]?.durum != "bitti" } ?? tum.first
+    }
+}
+
+// Part içindeki bölüm başlığı sayısı (önbellekli)
+@MainActor enum PartBilgisi {
+    private static var sayilar: [String: Int] = [:]
+    static func bolumSayisi(_ id: String) -> Int? {
+        if let n = sayilar[id] { return n }
+        guard let n = IcerikYonetici.ortak.part(id)?.bolumler.count else { return nil }
+        sayilar[id] = n
+        return n
+    }
+}
+
+struct DurumDairesi: View {
+    let durum: String?
+    let no: Int
+    var boy: CGFloat = 32
+    var vurgulu = false
+    var body: some View {
+        ZStack {
+            if durum == "bitti" {
+                Circle().fill(Tema.dolgu)
+                Image(systemName: "checkmark").font(.system(size: boy * 0.4, weight: .heavy)).foregroundStyle(Tema.dolguUstu)
+            } else if durum == "yarim" {
+                Circle().strokeBorder(Tema.vurgu, lineWidth: 1.6)
+                Circle().trim(from: 0, to: 0.5).fill(Tema.vurgu).rotationEffect(.degrees(90)).padding(boy * 0.14)
+            } else {
+                Circle().strokeBorder(vurgulu ? Tema.kartYazi.opacity(0.55) : Tema.soluk, lineWidth: 1.5)
+                Text("\(no)").font(Tema.yazi(boy * 0.4, .semibold)).foregroundStyle(vurgulu ? Tema.kartYazi.opacity(0.6) : Tema.soluk)
+            }
+        }
+        .frame(width: boy, height: boy)
+    }
+}
+
+struct IlerlemeHalkasi: View {
+    let biten: Int; let toplam: Int
+    var body: some View {
+        let oran: CGFloat = toplam > 0 ? CGFloat(biten) / CGFloat(toplam) : 0
+        ZStack {
+            Circle().stroke(Tema.soluk.opacity(0.28), lineWidth: 6)
+            Circle().trim(from: 0, to: max(oran, biten > 0 ? 0.04 : 0)).stroke(Tema.dolgu, style: StrokeStyle(lineWidth: 6, lineCap: .round)).rotationEffect(.degrees(-90))
+            Text("\(biten)/\(toplam)").font(Tema.yazi(14, .semibold)).foregroundStyle(Tema.murekkep).monospacedDigit()
+        }
+        .frame(width: 66, height: 66)
+    }
+}
+
+struct GeriDugmesi: View {
+    let ad: String
+    @Environment(\.dismiss) private var kapat
+    var body: some View {
+        Button { kapat() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left").font(.system(size: 14, weight: .bold))
+                Text(ad).font(Tema.yazi(14, .semibold))
+            }
+            .foregroundStyle(Tema.murekkep).padding(.leading, 12).padding(.trailing, 18).padding(.vertical, 10).camYuzey(24)
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("geri-liste")
+    }
+}
+
 struct KutuphaneEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
     @State private var acikPart: (PartOzet, Part)?
     @State private var acikHedef: String?
     @State private var ayarAcik = false
-    @State private var ozet = Ozet()
 
     var body: some View {
         NavigationStack {
             GeometryReader { g in
                 let genis = g.size.width > 900 && g.size.width > g.size.height   // yatayda iki sütun, dikeyde tek sütun
                 ScrollView {
-                    Group {
+                    VStack(alignment: .leading, spacing: 26) {
+                        ust
                         if genis {
-                            HStack(alignment: .top, spacing: 44) {
-                                VStack(alignment: .leading, spacing: 28) { ust; devamBolumu }.frame(width: min(440, g.size.width * 0.4))
-                                VStack(alignment: .leading, spacing: 28) { kitaplar; sonNotlar }
+                            HStack(alignment: .top, spacing: 38) {
+                                bolumPaneli.frame(width: min(640, g.size.width * 0.52))
+                                kitaplar
                             }
                         } else {
-                            VStack(alignment: .leading, spacing: 28) { ust; devamBolumu; kitaplar; sonNotlar }
+                            bolumPaneli
+                            kitaplar
                         }
                     }
-                    .padding(.horizontal, genis ? 48 : 28).padding(.top, 8).padding(.bottom, 40)
+                    .padding(.horizontal, genis ? 52 : 26).padding(.vertical, 30)
                 }
-                .refreshable { await icerik.indir(); await Senkron.ortak.hepsi(); ozet = Ozet.hesapla(icerik) }
+                .refreshable { await icerik.indir(); await Senkron.ortak.hepsi() }
             }
-            .background(NoktaliZemin())
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { ayarAcik = true } label: { Image(systemName: "slider.horizontal.3") }.accessibilityIdentifier("ayarlar")
-                }
-            }
+            .background(Atmosfer())
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Ders.self) { d in KitapEkrani(ders: d, ac: ac) }
             .navigationDestination(for: BolumSecimi.self) { s in BolumEkrani(ders: s.ders, bolum: s.bolum, ac: ac) }
         }
-        .onAppear { ozet = Ozet.hesapla(icerik) }
-        .onChange(of: acikPart == nil) { _, kapandi in if kapandi { ozet = Ozet.hesapla(icerik) } }
         .sheet(isPresented: $ayarAcik) { AyarEkrani() }
         .fullScreenCover(isPresented: Binding(get: { acikPart != nil }, set: { if !$0 { acikPart = nil } })) {
             if let acik = acikPart {
@@ -55,55 +131,46 @@ struct KutuphaneEkrani: View {
     }
 
     private var ust: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(Self.tarih()).font(Tema.etiket(12)).tracking(1.6).foregroundStyle(Tema.soluk)
-            Text("Defter").font(Tema.baslik(64, .heavy)).tracking(-1.5).foregroundStyle(Tema.murekkep)
-            Text("Kitabın üstüne yaz, kenarına not al, kaldığın yerden devam et.").font(.callout).foregroundStyle(Tema.soluk)
+        HStack {
+            Text("Defter").font(Tema.baslik(40, .semibold)).foregroundStyle(Tema.murekkep)
+            Spacer()
+            Button { ayarAcik = true } label: {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 19, weight: .medium)).foregroundStyle(Tema.murekkep)
+                    .frame(width: 48, height: 48).camYuzey(24)
+            }
+            .buttonStyle(.plain).accessibilityIdentifier("ayarlar")
         }
     }
 
-    @ViewBuilder private var devamBolumu: some View {
-        if let d = devamEdilecek() {
-            Button { ac(d.0) } label: { DevamKarti(part: d.0, ders: d.1, bolumNo: d.2, yarim: d.3, ilerleme: icerik.ilerleme[d.0.id]) }
-                .buttonStyle(.plain).accessibilityIdentifier("devam")
-        } else if icerik.plan == nil {
-            VStack(alignment: .leading, spacing: 10) {
+    // Sol panel: kalınan yerin bölümü ve part listesi
+    @ViewBuilder private var bolumPaneli: some View {
+        if let d = DevamYeri.bul(icerik) {
+            BolumPaneli(devam: d, ac: ac)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
                 ProgressView()
-                Text(icerik.hata ?? "İçerik indiriliyor…").foregroundStyle(Tema.soluk)
+                Text(icerik.hata ?? "İçerik indiriliyor…").font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
             }
+            .padding(28).frame(maxWidth: .infinity, alignment: .leading).camYuzey(30)
         }
     }
 
     private var kitaplar: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Etiket(yazi: "Kitaplar")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 22, alignment: .top)], alignment: .leading, spacing: 26) {
-                ForEach(Array((icerik.plan?.dersler ?? []).enumerated()), id: \.element.id) { i, d in
-                    NavigationLink(value: d) {
-                        let partlar = d.bolumler.flatMap { $0.partlar }
-                        VStack(alignment: .leading, spacing: 10) {
-                            KitapKapagi(ders: d, sira: i)
-                            Text("\(d.bolumler.count) bölüm · \(partlar.count) part").font(Tema.etiket(11)).foregroundStyle(Tema.soluk)
-                            IlerlemeCubugu(biten: partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count, toplam: partlar.count)
-                        }
-                    }
-                    .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
+        let dersler: [Ders] = icerik.plan?.dersler ?? []
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Etiket(yazi: "Kitaplar")
+                Spacer()
+                Text("\(dersler.count) kitap").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 250), spacing: 24, alignment: .top)], alignment: .leading, spacing: 28) {
+                ForEach(Array(dersler.enumerated()), id: \.element.id) { i, d in
+                    NavigationLink(value: d) { KitapKarti(ders: d, sira: i) }
+                        .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
                 }
             }
         }
-    }
-
-    @ViewBuilder private var sonNotlar: some View {
-        if !ozet.sonNotlar.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Etiket(yazi: "Son notlar")
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 16)], alignment: .leading, spacing: 16) {
-                    ForEach(ozet.sonNotlar) { s in
-                        Button { if let o = partOzet(s.part) { ac(o) } } label: { NotKarti(not: s.not, partAdi: partAdi(s.part)) }.buttonStyle(.plain)
-                    }
-                }
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func ac(_ o: PartOzet) {
@@ -111,132 +178,89 @@ struct KutuphaneEkrani: View {
         acikPart = (o, p)
     }
     private func partOzet(_ id: String) -> PartOzet? { icerik.plan?.dersler.flatMap { $0.bolumler.flatMap { $0.partlar } }.first { $0.id == id } }
-    private func partAdi(_ id: String) -> String { partOzet(id).map { "Part \($0.no) · \($0.baslik)" } ?? id }
-
-    // Yarım kalan en son part; yoksa sıradaki başlanmamış part
-    private func devamEdilecek() -> (PartOzet, Ders, Int, Bool)? {
-        guard let plan = icerik.plan else { return nil }
-        let tum = plan.dersler.flatMap { d in d.bolumler.flatMap { b in b.partlar.map { ($0, d, b.no) } } }
-        if let y = tum.filter({ icerik.ilerleme[$0.0.id]?.durum == "yarim" && $0.0.hazir })
-            .max(by: { (icerik.ilerleme[$0.0.id]?.guncelleme ?? 0) < (icerik.ilerleme[$1.0.id]?.guncelleme ?? 0) }) { return (y.0, y.1, y.2, true) }
-        if let s = tum.first(where: { $0.0.hazir && icerik.ilerleme[$0.0.id]?.durum != "bitti" }) { return (s.0, s.1, s.2, false) }
-        return nil
-    }
-
-    static func tarih() -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "tr_TR"); f.dateFormat = "EEEE · d MMMM"
-        return f.string(from: Date()).uppercased(with: Locale(identifier: "tr_TR"))
-    }
 }
 
-// Kütüphane özeti: kayıt dosyalarından notlar ve çizimler
-struct Ozet {
-    var bitenPart = 0, toplamPart = 0, notSayisi = 0, cizilenSayfa = 0
-    struct SonNot: Identifiable { let not: YapiskanNot; let part: String; var id: String { not.id } }
-    var sonNotlar: [SonNot] = []
-    @MainActor static func hesapla(_ icerik: IcerikYonetici) -> Ozet {
-        var o = Ozet()
-        let partlar = icerik.plan?.dersler.flatMap { $0.bolumler.flatMap { $0.partlar } } ?? []
-        o.toplamPart = partlar.filter { $0.hazir }.count
-        o.bitenPart = partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
-        var notlar: [(YapiskanNot, String)] = []
-        if Ayar.ornek {
-            notlar = [(YapiskanNot(sayfa: "b0", x: 0, y: 0, yazi: "Ortaya çıkan özellik ≠ parçaların toplamı. Sınavda araba örneği!"), "part-01"),
-                      (YapiskanNot(sayfa: "b1", x: 0, y: 0, renk: "mavi", yazi: "Organ sistemleri tablosunu ezberle: 10 sistem"), "part-01")]
-            o.cizilenSayfa = 3
-        } else {
-            for p in partlar {
-                let k = Depo.partKaydi(p.id)
-                o.cizilenSayfa += k.cizimler.count
-                notlar += k.notlar.map { ($0, p.id) }
-            }
-        }
-        o.notSayisi = notlar.count
-        o.sonNotlar = notlar.sorted { $0.0.zaman > $1.0.zaman }.prefix(6).map { SonNot(not: $0.0, part: $0.1) }
-        return o
-    }
-}
-
-struct BolumSecimi: Hashable { let ders: Ders; let bolum: Bolum }
-
-struct DevamKarti: View {
-    let part: PartOzet; let ders: Ders; let bolumNo: Int; let yarim: Bool; let ilerleme: Ilerleme?
-    @State private var onizleme: UIImage?
+struct KitapKarti: View {
+    @EnvironmentObject var icerik: IcerikYonetici
+    let ders: Ders; let sira: Int
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4).fill(Color.white)
-                if let r = onizleme { Image(uiImage: r).resizable().scaledToFit().padding(2) }
-                else { VStack(spacing: 5) { ForEach(0..<9, id: \.self) { i in Capsule().fill(Color.black.opacity(0.08)).frame(height: 3).padding(.trailing, CGFloat(i % 3) * 14) } }.padding(14) }
-            }
-            .frame(width: 112, height: 150)
-            .shadow(color: .black.opacity(0.15), radius: 8, x: 2, y: 5)
-            .rotationEffect(.degrees(-2.5))
-            VStack(alignment: .leading, spacing: 8) {
-                Etiket(yazi: yarim ? "Kaldığın yer" : "Sıradaki", renk: Tema.vurgu)
-                Text(part.baslik).font(Tema.baslik(28, .bold)).foregroundStyle(Tema.murekkep).lineLimit(2)
-                Text("\(ders.baslik) · Bölüm \(bolumNo) · Part \(part.no)\(part.kitap.map { " · " + $0 } ?? "")")
-                    .font(Tema.etiket(11)).foregroundStyle(Tema.soluk)
-                Spacer(minLength: 6)
-                HStack(spacing: 8) {
-                    Text(yarim ? "Devam et" : "Başla").font(.headline)
-                    Image(systemName: "arrow.right").font(.headline)
+        let partlar = ders.bolumler.flatMap { $0.partlar }
+        let biten = partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
+        VStack(alignment: .leading, spacing: 12) {
+            KitapKapagi(ders: ders, sira: sira)
+            IlerlemeCubugu(biten: biten, toplam: partlar.count)
+        }
+    }
+}
+
+// Sol panel: "İnsan Fizyolojisi · Silverthorn / Bölüm 1 Fizyolojiye giriş" + part listesi (kalınan part beyaz satır)
+struct BolumPaneli: View {
+    @EnvironmentObject var icerik: IcerikYonetici
+    let devam: DevamYeri
+    let ac: (PartOzet) -> Void
+    var body: some View {
+        let partlar = devam.bolum.partlar
+        let biten = partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
+        let ustYazi = [devam.ders.baslik, devam.ders.kaynak].compactMap { $0 }.joined(separator: " · ")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(ustYazi).font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+                    Text("Bölüm \(devam.bolum.no)").font(Tema.baslik(30, .semibold)).foregroundStyle(Tema.murekkep)
+                    Text(devam.bolum.baslik).font(Tema.baslik(30, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
                 }
-                .foregroundStyle(.white).padding(.horizontal, 18).padding(.vertical, 11)
-                .background(Tema.vurgu, in: Capsule())
+                Spacer(minLength: 12)
+                IlerlemeHalkasi(biten: biten, toplam: partlar.count)
             }
-            Spacer(minLength: 0)
+            .padding(.bottom, 14)
+            ForEach(partlar) { p in satir(p) }
         }
-        .padding(22)
-        .background(Tema.kart, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Tema.cizgi, lineWidth: 1))
-        .onAppear { onizleme = SayfaOnizleme.resim(partId: part.id, bolumSira: ilerleme?.sayfa, boy: CGSize(width: 220, height: 300)) }
+        .padding(.horizontal, 22).padding(.vertical, 26)
+        .camYuzey(34)
     }
-}
 
-struct IstatistikKutusu: View {
-    let sayi: String; let ust: String?; let ad: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(sayi).font(Tema.baslik(34, .heavy)).foregroundStyle(Tema.murekkep).monospacedDigit()
-                if let u = ust { Text(u).font(Tema.etiket(13, .bold)).foregroundStyle(Tema.soluk) }
+    private func satir(_ p: PartOzet) -> some View {
+        let durum = icerik.ilerleme[p.id]?.durum
+        let bu = p.id == devam.part.id
+        let daireDurumu: String? = (bu && devam.yarim) ? "yarim" : durum
+        return Button { ac(p) } label: {
+            HStack(spacing: 16) {
+                DurumDairesi(durum: daireDurumu, no: p.no, boy: 32, vurgulu: bu)
+                Text(p.baslik).font(Tema.baslik(19, .medium)).multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                satirSonu(p, durum: durum, bu: bu)
             }
-            Text(ad.uppercased(with: Locale(identifier: "tr_TR"))).font(Tema.etiket(10, .bold)).tracking(1.2).foregroundStyle(Tema.soluk)
+            .padding(.horizontal, 16).padding(.vertical, 13)
+            .foregroundStyle(bu ? Tema.kartYazi : Tema.murekkep)
+            .background(bu ? Tema.kart : Color.clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: bu ? Color.black.opacity(0.28) : Color.clear, radius: 14, x: 0, y: 8)
+            .opacity(durum == "bitti" && !bu ? 0.78 : 1)
+            .contentShape(Rectangle())
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tema.kart.opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Tema.cizgi, lineWidth: 1))
+        .buttonStyle(.plain).disabled(!p.hazir).accessibilityIdentifier(bu ? "devam" : p.id)
+    }
+
+    @ViewBuilder private func satirSonu(_ p: PartOzet, durum: String?, bu: Bool) -> some View {
+        if bu {
+            HStack(spacing: 4) {
+                Text(devam.yarim ? "kalınan yer" : "sıradaki")
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
+            }
+            .font(Tema.yazi(12.5, .bold)).foregroundStyle(Tema.vurgu)
+        } else if !p.hazir {
+            Text("yazılıyor").font(Tema.yazi(12.5)).foregroundStyle(Tema.soluk)
+        } else if durum == "bitti" {
+            Text("tamamlandı").font(Tema.yazi(12.5)).foregroundStyle(Tema.soluk)
+        }
     }
 }
 
-struct NotKarti: View {
-    let not: YapiskanNot; let partAdi: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(not.yazi.isEmpty ? "El yazısı not" : not.yazi).font(.system(size: 16, weight: .medium, design: .serif))
-                .foregroundStyle(Color.black.opacity(0.8)).lineLimit(4).frame(maxWidth: .infinity, minHeight: 66, alignment: .topLeading)
-            Text(partAdi.uppercased(with: Locale(identifier: "tr_TR"))).font(Tema.etiket(9, .bold)).tracking(1).foregroundStyle(Color.black.opacity(0.45)).lineLimit(1)
-        }
-        .padding(16)
-        .background(Color(NotRenk.renk(not.renk)), in: RoundedRectangle(cornerRadius: 4))
-        .shadow(color: .black.opacity(0.12), radius: 6, x: 1, y: 4)
-        .rotationEffect(.degrees(not.id.unicodeScalars.reduce(0) { $0 + Int($1.value) } % 2 == 0 ? -1.2 : 1.0))
-    }
-}
-
-struct IlerlemeCubugu: View {
-    let biten: Int; let toplam: Int
-    var body: some View {
-        HStack(spacing: 10) {
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Tema.cizgi)
-                    Capsule().fill(Tema.vurgu).frame(width: toplam > 0 ? max(4, g.size.width * CGFloat(biten) / CGFloat(toplam)) : 0).opacity(biten > 0 ? 1 : 0)
-                }
-            }.frame(height: 4)
-            Text("\(biten)/\(toplam)").font(Tema.etiket(11, .bold)).foregroundStyle(Tema.soluk).monospacedDigit()
-        }
+// Vurgulu satır beyaz kart olur, diğerleri cam
+struct CamSartli: ViewModifier {
+    let etkin: Bool
+    let yaricap: CGFloat
+    @ViewBuilder func body(content: Content) -> some View {
+        if etkin { content.camYuzey(yaricap) } else { content }
     }
 }
 
@@ -245,47 +269,95 @@ struct KitapEkrani: View {
     let ders: Ders
     let ac: (PartOzet) -> Void
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                HStack(alignment: .bottom, spacing: 26) {
-                    KitapKapagi(ders: ders, sira: 0).frame(width: 150)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Etiket(yazi: "Kitap")
-                        Text(ders.baslik).font(Tema.baslik(48, .heavy)).foregroundStyle(Tema.murekkep)
-                        if let k = ders.kaynak { Text(k).font(Tema.etiket(13)).foregroundStyle(Tema.soluk) }
-                        let partlar = ders.bolumler.flatMap { $0.partlar }
-                        IlerlemeCubugu(biten: partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count, toplam: partlar.count).frame(maxWidth: 280).padding(.top, 6)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 14) {
-                    Etiket(yazi: "Bölümler")
-                    VStack(spacing: 0) {
-                        ForEach(ders.bolumler) { b in
-                            NavigationLink(value: BolumSecimi(ders: ders, bolum: b)) {
-                                let biten = b.partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
-                                HStack(alignment: .center, spacing: 22) {
-                                    Text(String(format: "%02d", b.no)).font(Tema.etiket(30, .bold)).foregroundStyle(Tema.vurgu).frame(width: 64, alignment: .leading)
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(b.baslik).font(Tema.baslik(24, .bold)).foregroundStyle(Tema.murekkep).multilineTextAlignment(.leading)
-                                        IlerlemeCubugu(biten: biten, toplam: b.partlar.count).frame(maxWidth: 260)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "arrow.right").font(.title3).foregroundStyle(Tema.soluk)
-                                }
-                                .padding(.vertical, 22).padding(.horizontal, 6).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain).accessibilityIdentifier("bolum-\(b.no)")
-                            Rectangle().fill(Tema.cizgi).frame(height: 1)
+        GeometryReader { g in
+            let genis = g.size.width > 900
+            let partlar = ders.bolumler.flatMap { $0.partlar }
+            let biten = partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    HStack { GeriDugmesi(ad: "Kitaplar"); Spacer() }
+                    if genis {
+                        HStack(alignment: .top, spacing: 44) {
+                            sol(biten: biten, toplam: partlar.count).frame(width: 300)
+                            bolumler
                         }
+                    } else {
+                        sol(biten: biten, toplam: partlar.count).frame(maxWidth: 420, alignment: .leading)
+                        bolumler
                     }
-                    .overlay(alignment: .top) { Rectangle().fill(Tema.murekkep).frame(height: 2) }
                 }
+                .padding(.horizontal, genis ? 54 : 26).padding(.vertical, 30)
             }
-            .padding(.horizontal, 48).padding(.vertical, 20).frame(maxWidth: 980, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .background(NoktaliZemin())
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .background(Atmosfer())
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private func sol(biten: Int, toplam: Int) -> some View {
+        let yuzde: Int = toplam > 0 ? Int((Double(biten) / Double(toplam) * 100).rounded()) : 0
+        return VStack(alignment: .leading, spacing: 18) {
+            KitapKapagi(ders: ders, sira: 0)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(ders.baslik).font(Tema.baslik(34, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
+                if let k = ders.kaynak { Text(k).font(Tema.yazi(14)).foregroundStyle(Tema.soluk) }
+            }
+            HStack(spacing: 12) {
+                istatistik("%\(yuzde)", "kitap ilerlemesi")
+                istatistik("\(biten) / \(toplam)", "part bitti")
+            }
+        }
+    }
+
+    private func istatistik(_ sayi: String, _ ad: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(sayi).font(Tema.baslik(22, .semibold)).foregroundStyle(Tema.murekkep).monospacedDigit()
+            Text(ad).font(Tema.yazi(12)).foregroundStyle(Tema.soluk)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).camYuzey(20)
+    }
+
+    private var bolumler: some View {
+        let devamNo: Int? = DevamYeri.bul(icerik)?.bolum.no
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Etiket(yazi: "Bölümler")
+                Spacer()
+                Text("\(ders.bolumler.count) bölüm").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+            }
+            ForEach(ders.bolumler) { b in
+                NavigationLink(value: BolumSecimi(ders: ders, bolum: b)) { BolumSatiri(bolum: b, vurgulu: b.no == devamNo) }
+                    .buttonStyle(.plain).accessibilityIdentifier("bolum-\(b.no)")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct BolumSatiri: View {
+    @EnvironmentObject var icerik: IcerikYonetici
+    let bolum: Bolum
+    let vurgulu: Bool
+    var body: some View {
+        let biten = bolum.partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
+        HStack(spacing: 20) {
+            Text("\(bolum.no)").font(Tema.baslik(34, .light)).foregroundStyle(vurgulu ? Tema.vurgu : Tema.soluk).frame(width: 52, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(bolum.baslik).font(Tema.baslik(21, .semibold)).multilineTextAlignment(.leading)
+                Text("\(bolum.partlar.count) part").font(Tema.yazi(13)).foregroundStyle(vurgulu ? Tema.kartYazi.opacity(0.65) : Tema.soluk)
+            }
+            Spacer(minLength: 10)
+            VStack(alignment: .trailing, spacing: 8) {
+                Text("\(biten) / \(bolum.partlar.count) part").font(Tema.yazi(13, .semibold)).foregroundStyle(vurgulu ? Tema.vurgu : Tema.soluk)
+                IlerlemeCubugu(biten: biten, toplam: bolum.partlar.count, etiketGoster: false).frame(width: 120)
+            }
+        }
+        .padding(.horizontal, 22).padding(.vertical, 18)
+        .foregroundStyle(vurgulu ? Tema.kartYazi : Tema.murekkep)
+        .background(vurgulu ? Tema.kart : Color.clear, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: vurgulu ? Color.black.opacity(0.28) : Color.clear, radius: 16, x: 0, y: 10)
+        .modifier(CamSartli(etkin: !vurgulu, yaricap: 24))
+        .contentShape(Rectangle())
     }
 }
 
@@ -294,51 +366,59 @@ struct BolumEkrani: View {
     let ders: Ders; let bolum: Bolum
     let ac: (PartOzet) -> Void
     var body: some View {
+        let biten = bolum.partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Etiket(yazi: "\(ders.baslik) · Bölüm \(String(format: "%02d", bolum.no))")
-                    Text(bolum.baslik).font(Tema.baslik(46, .heavy)).foregroundStyle(Tema.murekkep)
-                    IlerlemeCubugu(biten: bolum.partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count, toplam: bolum.partlar.count)
-                        .frame(maxWidth: 320).padding(.top, 4)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(bolum.partlar.enumerated()), id: \.element.id) { i, p in
-                        let durum = icerik.ilerleme[p.id]?.durum
-                        Button { ac(p) } label: {
-                            HStack(alignment: .top, spacing: 18) {
-                                VStack(spacing: 0) {
-                                    Rectangle().fill(i == 0 ? Color.clear : Tema.cizgi).frame(width: 2, height: 22)
-                                    ZStack {
-                                        Circle().fill(durum == "bitti" ? Tema.vurgu : Tema.kart)
-                                        Circle().strokeBorder(durum == nil ? Tema.murekkep.opacity(p.hazir ? 0.7 : 0.25) : Tema.vurgu, lineWidth: 2)
-                                        if durum == "bitti" { Image(systemName: "checkmark").font(.system(size: 11, weight: .heavy)).foregroundStyle(.white) }
-                                        else if durum == "yarim" { Circle().trim(from: 0, to: 0.5).fill(Tema.vurgu).rotationEffect(.degrees(90)).padding(4) }
-                                    }.frame(width: 24, height: 24)
-                                    Rectangle().fill(i == bolum.partlar.count - 1 ? Color.clear : Tema.cizgi).frame(width: 2).frame(maxHeight: .infinity)
-                                }
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("P\(String(format: "%02d", p.no))").font(Tema.etiket(11, .bold)).foregroundStyle(p.hazir ? Tema.vurgu : Tema.soluk)
-                                    Text(p.baslik).font(Tema.baslik(22, .bold)).foregroundStyle(p.hazir ? Tema.murekkep : Tema.soluk)
-                                    Text([p.hazir ? (durum == "bitti" ? "Bitti" : durum == "yarim" ? "Yarım" : "Başlamadı") : "Yazılıyor", p.kitap].compactMap { $0 }.joined(separator: " · ").uppercased(with: Locale(identifier: "tr_TR")))
-                                        .font(Tema.etiket(10, .semibold)).tracking(1).foregroundStyle(Tema.soluk)
-                                }
-                                .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(p.hazir ? Tema.kart : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Tema.cizgi, style: StrokeStyle(lineWidth: 1, dash: p.hazir ? [] : [5, 4])))
-                                .padding(.vertical, 6)
-                            }
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .buttonStyle(.plain).disabled(!p.hazir).accessibilityIdentifier(p.id)
+            VStack(alignment: .leading, spacing: 28) {
+                HStack { GeriDugmesi(ad: ders.baslik); Spacer() }
+                HStack(alignment: .bottom, spacing: 26) {
+                    Text("\(bolum.no)").font(Tema.baslik(120, .ultraLight)).foregroundStyle(Tema.soluk).minimumScaleFactor(0.5)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(bolum.baslik).font(Tema.baslik(44, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
+                        Text("Bölüm \(bolum.no) · \(bolum.partlar.count) part").font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
+                        IlerlemeCubugu(biten: biten, toplam: bolum.partlar.count, etiketGoster: false).frame(maxWidth: 300).padding(.top, 6)
                     }
                 }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 16, alignment: .top)], spacing: 16) {
+                    ForEach(bolum.partlar) { p in PartKarti(part: p, ac: ac) }
+                }
             }
-            .padding(.horizontal, 48).padding(.vertical, 20).frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity)
+            .padding(.horizontal, 54).padding(.vertical, 30)
         }
-        .background(NoktaliZemin())
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .background(Atmosfer())
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+struct PartKarti: View {
+    @EnvironmentObject var icerik: IcerikYonetici
+    let part: PartOzet
+    let ac: (PartOzet) -> Void
+    var body: some View {
+        let durum = icerik.ilerleme[part.id]?.durum
+        let bu = durum == "yarim"
+        let sag: String = part.hazir ? (durum == "bitti" ? "tamamlandı" : (bu ? "kalınan yer" : "")) : "yazılıyor"
+        return Button { ac(part) } label: {
+            HStack(spacing: 18) {
+                DurumDairesi(durum: durum, no: part.no, boy: 44, vurgulu: bu)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(part.baslik).font(Tema.baslik(21, .semibold)).multilineTextAlignment(.leading)
+                    if let n = PartBilgisi.bolumSayisi(part.id) {
+                        Text("\(n) bölüm başlığı").font(Tema.yazi(12.5)).foregroundStyle(bu ? Tema.kartYazi.opacity(0.65) : Tema.soluk)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(sag).font(Tema.yazi(12.5, bu ? .bold : .regular)).foregroundStyle(bu ? Tema.vurgu : Tema.soluk)
+            }
+            .padding(.horizontal, 22).padding(.vertical, 22).frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+            .foregroundStyle(bu ? Tema.kartYazi : Tema.murekkep)
+            .background(bu ? Tema.kart : Color.clear, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: bu ? Color.black.opacity(0.28) : Color.clear, radius: 16, x: 0, y: 10)
+            .modifier(CamSartli(etkin: !bu, yaricap: 26))
+            .opacity(part.hazir ? 1 : 0.6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!part.hazir).accessibilityIdentifier(part.id)
     }
 }
 
@@ -346,11 +426,18 @@ struct AyarEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
     @EnvironmentObject var senkron: Senkron
     @Environment(\.dismiss) private var kapat
+    @AppStorage("tema") private var tema = TemaSecimi.otomatik.rawValue
     @State private var anahtar = ""
     @State private var tani: [String] = Tani.kayitlar
     var body: some View {
         NavigationStack {
             Form {
+                Section("Görünüm") {
+                    Picker("Tema", selection: $tema) {
+                        ForEach(TemaSecimi.allCases) { t in Text(t.ad).tag(t.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Section("Eşitleme") {
                     LabeledContent("Durum", value: senkron.durum)
                     Button("Şimdi eşitle") { Task { await icerik.indir(); await senkron.hepsi() } }

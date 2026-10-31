@@ -9,7 +9,7 @@ import CryptoKit
 @MainActor
 final class PdfUretici: NSObject, WKNavigationDelegate {
     static let ortak = PdfUretici()
-    static let stilSurumu = "4"
+    static let stilSurumu = "5"
     nonisolated static let kagit: CGFloat = 800, solPay: CGFloat = 48, ustPay: CGFloat = 44, altPay: CGFloat = 64
     nonisolated static var sayfaGenislik: CGFloat { kagit + 2 * solPay }
     nonisolated static let enAzYukseklik: CGFloat = 1150   // kısa bölümlerde altta not alacak yer kalsın
@@ -132,7 +132,7 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
 
     private func hazirla() {
         // Yazı tipleri içerik klasörüne kopyalanır (WebView yalnız o klasörü okuyabilir)
-        for ad in ["figtree-latin-wght-normal", "figtree-latin-ext-wght-normal"] {
+        for ad in ["literata-latin-wght-normal", "literata-latin-ext-wght-normal", "plus-jakarta-sans-latin-wght-normal", "plus-jakarta-sans-latin-ext-wght-normal"] {
             let hedef = Depo.icerik.appendingPathComponent(ad + ".woff2")
             if !FileManager.default.fileExists(atPath: hedef.path), let kaynak = Bundle.main.url(forResource: ad, withExtension: "woff2") {
                 try? FileManager.default.copyItem(at: kaynak, to: hedef)
@@ -165,29 +165,31 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
         let g = govde.replacingOccurrences(of: "src=\"icerik/", with: "src=\"")
         return """
         <!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=\(Int(sayfaGenislik))"><style>
-        @font-face { font-family: "Figtree"; font-weight: 300 900; src: url("figtree-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215; }
-        @font-face { font-family: "Figtree"; font-weight: 300 900; src: url("figtree-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+        @font-face { font-family: "Literata"; font-weight: 200 900; src: url("literata-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215; }
+        @font-face { font-family: "Literata"; font-weight: 200 900; src: url("literata-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+        @font-face { font-family: "Jakarta"; font-weight: 200 800; src: url("plus-jakarta-sans-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215; }
+        @font-face { font-family: "Jakarta"; font-weight: 200 800; src: url("plus-jakarta-sans-latin-ext-wght-normal.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
         * { box-sizing: border-box; }
         html, body { margin: 0; background: transparent; color: #15151c; -webkit-text-size-adjust: 100%; }
-        .ref { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: currentColor; }
-        .kagit { width: \(Int(kagit))px; margin: \(Int(ustPay))px \(Int(solPay))px 0; font: 400 21px/1.7 "Figtree", -apple-system, sans-serif; letter-spacing: .002em; }
-        h1 { font: 800 2.55em/1.12 "Figtree"; letter-spacing: -.03em; margin: 0 0 1.6rem; }
-        h2 { font: 700 1.4rem/1.25 "Figtree"; letter-spacing: -.02em; margin: 2.2rem 0 .8rem; }
-        h3 { font: 700 1.15rem/1.3 "Figtree"; margin: 1.8rem 0 .6rem; }
+        .ref { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: #b4553a; }
+        .kagit { width: \(Int(kagit))px; margin: \(Int(ustPay))px \(Int(solPay))px 0; font: 400 21px/1.7 "Literata", Georgia, serif; }
+        h1 { font: 600 2.45em/1.14 "Literata"; letter-spacing: -.02em; margin: 0 0 1.6rem; }
+        h2 { font: 600 1.4rem/1.25 "Literata"; letter-spacing: -.01em; margin: 2.2rem 0 .8rem; }
+        h3 { font: 600 1.15rem/1.3 "Literata"; margin: 1.8rem 0 .6rem; }
         p, li { max-width: 42rem; } p { margin: 0 0 1.1rem; }
         ul, ol { padding-left: 1.35rem; margin: 0 0 1.2rem; } li { margin: .35rem 0; }
-        li::marker { color: #4f5bd5; font-weight: 700; }
-        strong { font-weight: 700; } em, i { font-style: normal; font-weight: 600; }
-        a { color: #4f5bd5; text-decoration: none; }
-        code { font: .9em "Figtree"; background: #ececf1; padding: .1em .4em; border-radius: .4em; }
-        pre { white-space: pre-wrap; background: #ececf1; border-radius: 12px; padding: 14px 16px; font: 17px/1.5 ui-monospace, Menlo, monospace; }
-        blockquote { margin: 1.5rem 0; padding: 1rem 1.2rem; background: #e9eafb; border-radius: 1rem; font-size: 1.05rem; line-height: 1.6; }
+        li::marker { color: #b4553a; font-weight: 700; }
+        strong { font-weight: 650; } em, i { font-style: italic; }
+        a { color: #b4553a; text-decoration: none; }
+        code { font: .9em "Jakarta"; background: #f1e7e1; padding: .1em .4em; border-radius: .4em; }
+        pre { white-space: pre-wrap; background: #f1e7e1; border-radius: 12px; padding: 14px 16px; font: 17px/1.5 ui-monospace, Menlo, monospace; }
+        blockquote { margin: 1.5rem 0; padding: 1rem 1.2rem; background: #f6e6dc; border-radius: 1rem; font-size: 1.05rem; line-height: 1.6; }
         blockquote p:last-child { margin-bottom: 0; }
         img { display: block; width: 100%; height: auto; margin: 1.5rem 0 1.8rem; border-radius: 1rem; background: #fff; border: 1px solid #e0e0e8; }
         hr { border: 0; border-top: 1px solid #e0e0e8; margin: 2rem 0; }
         .tablo { margin: 1.4rem 0 1.7rem; border: 1px solid #e0e0e8; border-radius: 1rem; overflow: hidden; background: #fff; }
-        table { border-collapse: collapse; width: 100%; font-size: .98rem; line-height: 1.5; }
-        th { text-align: left; background: #ececf1; font-weight: 700; } th, td { padding: .7rem .9rem; border-bottom: 1px solid #e0e0e8; vertical-align: top; }
+        table { border-collapse: collapse; width: 100%; font: .95rem/1.5 "Jakarta", sans-serif; }
+        th { text-align: left; background: #f1e7e1; font-weight: 700; } th, td { padding: .7rem .9rem; border-bottom: 1px solid #e0e0e8; vertical-align: top; }
         tr:last-child td { border-bottom: 0; }
         </style></head><body><div class="kagit"><div class="metin"><h1>\(baslik)</h1>\(g)</div></div></body></html>
         """

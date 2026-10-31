@@ -7,7 +7,7 @@ final class EkranGoruntuleri: XCTestCase {
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
-        app.launchArguments = ["-ornek"]
+        app.launchArguments = ["-ornek", "-tema", "acik"]
     }
 
     private func cek(_ ad: String) {
@@ -79,5 +79,28 @@ final class EkranGoruntuleri: XCTestCase {
         if app.buttons["Kaydet"].exists { app.alerts.buttons["Kaydet"].firstMatch.tap() }
         sleep(1)
         cek("13-kayit-sonrasi")
+    }
+    // Koyu tema: her ekranı yatayda gezip görüntüle (açık tema testGezinti'de görüntülenir)
+    func testKoyuTema() throws {
+        app.launchArguments = ["-ornek", "-tema", "koyu"]
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launch()
+        XCTAssertTrue(app.buttons["devam"].waitForExistence(timeout: 15))
+        sleep(1)
+        cek("k1-kutuphane-yatay")
+        let kitap = app.buttons["kitap-fizyoloji"].firstMatch
+        if kitap.waitForExistence(timeout: 5) { kitap.tap() }
+        if !app.buttons["bolum-1"].waitForExistence(timeout: 3) { kitap.tap() }
+        sleep(1)
+        cek("k2-kitap-yatay")
+        if app.buttons["bolum-1"].exists { app.buttons["bolum-1"].tap() }
+        sleep(1)
+        cek("k3-bolum-yatay")
+        if app.buttons["part-01"].waitForExistence(timeout: 5) { app.buttons["part-01"].tap() }
+        sleep(7)
+        cek("k4-okuyucu-yatay")
+        XCUIDevice.shared.orientation = .portrait
+        sleep(2)
+        cek("k5-okuyucu-dikey")
     }
 }

@@ -45,6 +45,9 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
+        UIAppFonts:
+          - Literata.ttf
+          - PlusJakartaSans.ttf
         ITSAppUsesNonExemptEncryption: false
   DefterUITests:
     type: bundle.ui-testing

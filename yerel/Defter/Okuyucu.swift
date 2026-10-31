@@ -53,11 +53,21 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Tema.zeminUI
+        let atmosfer = UIHostingController(rootView: Atmosfer())
+        addChild(atmosfer)
+        atmosfer.view.translatesAutoresizingMaskIntoConstraints = false
+        atmosfer.view.backgroundColor = .clear
+        view.insertSubview(atmosfer.view, at: 0)
+        NSLayoutConstraint.activate([
+            atmosfer.view.topAnchor.constraint(equalTo: view.topAnchor), atmosfer.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            atmosfer.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), atmosfer.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        atmosfer.didMove(toParent: self)
         kurUstCubuk()
         kurPanel()
         kurPdf()
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (k: OkuyucuKontrol, _: UITraitCollection) in
-            k.pdfView.backgroundColor = Tema.noktaliDesen(stil: k.traitCollection.userInterfaceStyle)
+            k.pilKenarlari()
         }
         view.addSubview(paletSahibi)
         yukleniyor.translatesAutoresizingMaskIntoConstraints = false
@@ -136,7 +146,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         addChild(panelKontrol)
         let v = panelKontrol.view!
         v.translatesAutoresizingMaskIntoConstraints = false
-        v.backgroundColor = Tema.zeminUI
+        v.backgroundColor = .clear
         view.addSubview(v)
         panelKontrol.didMove(toParent: self)
         panelGenislik = v.widthAnchor.constraint(equalToConstant: 0)
@@ -204,7 +214,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         pdfView.displaysPageBreaks = true
         pdfView.pageBreakMargins = UIEdgeInsets(top: 14, left: 24, bottom: 14, right: 24)
         pdfView.autoScales = false
-        pdfView.backgroundColor = Tema.noktaliDesen(stil: traitCollection.userInterfaceStyle)
+        pdfView.backgroundColor = .clear
         pdfView.pageShadowsEnabled = true
         pdfView.pageOverlayViewProvider = self
         pdfView.isInMarkupMode = true
@@ -470,17 +480,16 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     // MARK: Üst çubuk
     private func kurUstCubuk() {
         ustCubuk.translatesAutoresizingMaskIntoConstraints = false
-        ustCubuk.backgroundColor = Tema.zeminUI
+        ustCubuk.backgroundColor = .clear
         view.addSubview(ustCubuk)
-        let cizgi = UIView(); cizgi.backgroundColor = UIColor.separator; cizgi.translatesAutoresizingMaskIntoConstraints = false
+        let cizgi = UIView(); cizgi.backgroundColor = .clear; cizgi.translatesAutoresizingMaskIntoConstraints = false
         ustCubuk.addSubview(cizgi)
 
         let geri = ustDugme("Geri", sembol: "chevron.left") { [weak self] in self?.cik() }
         geri.accessibilityIdentifier = "geri"
         geri.toolTip = "Kütüphaneye dön"
         baslikEtiket.text = "Part \(part.no) · \(part.baslik)"
-        let serif = UIFont.systemFont(ofSize: 18, weight: .semibold).fontDescriptor.withDesign(.serif)
-        baslikEtiket.font = serif.map { UIFont(descriptor: $0, size: 18) } ?? .systemFont(ofSize: 18, weight: .semibold)
+        baslikEtiket.font = Tema.uiBaslik(17, 600)
         baslikEtiket.textColor = Tema.murekkepUI
         baslikEtiket.lineBreakMode = .byTruncatingTail
         baslikEtiket.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -516,23 +525,43 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
         let sol = UIStackView(arrangedSubviews: [geri, panelDugme, baslikEtiket]); sol.spacing = 8; sol.alignment = .center
         let sag = UIStackView(arrangedSubviews: [sayfaMenu, not, kalem, kaydetDugmesi]); sag.spacing = 6; sag.alignment = .center
-        for v in [sol, sag] { v.translatesAutoresizingMaskIntoConstraints = false; ustCubuk.addSubview(v) }
+        let pilSol = camPil(sol), pilSag = camPil(sag)
+        pilKapsayicilar = [pilSol, pilSag]
+        for v in [pilSol, pilSag] { v.translatesAutoresizingMaskIntoConstraints = false; ustCubuk.addSubview(v) }
+        pilKenarlari()
         NSLayoutConstraint.activate([
             ustCubuk.topAnchor.constraint(equalTo: view.topAnchor),
             ustCubuk.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             ustCubuk.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            ustCubuk.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 56),
-            sol.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
-            sol.bottomAnchor.constraint(equalTo: ustCubuk.bottomAnchor, constant: -8),
-            sol.heightAnchor.constraint(equalToConstant: 40),
-            sag.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
-            sag.centerYAnchor.constraint(equalTo: sol.centerYAnchor),
-            sol.trailingAnchor.constraint(lessThanOrEqualTo: sag.leadingAnchor, constant: -12),
+            ustCubuk.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 68),
+            pilSol.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14),
+            pilSol.bottomAnchor.constraint(equalTo: ustCubuk.bottomAnchor, constant: -8),
+            pilSol.heightAnchor.constraint(equalToConstant: 52),
+            pilSag.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
+            pilSag.centerYAnchor.constraint(equalTo: pilSol.centerYAnchor), pilSag.heightAnchor.constraint(equalToConstant: 52),
+            pilSol.trailingAnchor.constraint(lessThanOrEqualTo: pilSag.leadingAnchor, constant: -12),
             cizgi.leadingAnchor.constraint(equalTo: ustCubuk.leadingAnchor),
             cizgi.trailingAnchor.constraint(equalTo: ustCubuk.trailingAnchor),
             cizgi.bottomAnchor.constraint(equalTo: ustCubuk.bottomAnchor),
             cizgi.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
         ])
+    }
+
+    private var pilKapsayicilar: [UIView] = []
+    private func camPil(_ ic: UIStackView) -> UIVisualEffectView {
+        let p = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+        p.layer.cornerRadius = 26; p.layer.cornerCurve = .continuous; p.clipsToBounds = true; p.layer.borderWidth = 1
+        p.contentView.backgroundColor = Tema.camDolguUI
+        ic.translatesAutoresizingMaskIntoConstraints = false
+        p.contentView.addSubview(ic)
+        NSLayoutConstraint.activate([
+            ic.leadingAnchor.constraint(equalTo: p.contentView.leadingAnchor, constant: 10), ic.trailingAnchor.constraint(equalTo: p.contentView.trailingAnchor, constant: -8),
+            ic.topAnchor.constraint(equalTo: p.contentView.topAnchor, constant: 5), ic.bottomAnchor.constraint(equalTo: p.contentView.bottomAnchor, constant: -5),
+        ])
+        return p
+    }
+    private func pilKenarlari() {
+        for v in pilKapsayicilar { v.layer.borderColor = Tema.camKenarUI.resolvedColor(with: traitCollection).cgColor }
     }
 
     private func ikonDugme(_ sembol: String, ad: String, _ eylem: @escaping () -> Void) -> UIButton {
@@ -549,7 +578,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         c.title = yazi
         if let s = sembol { c.image = UIImage(systemName: s, withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)); c.imagePadding = 4 }
         c.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 10)
-        if yazi == "Kaydet" { c = .filled(); c.title = yazi; c.cornerStyle = .capsule; c.baseBackgroundColor = Tema.vurguUI }
+        if yazi == "Kaydet" { c = .filled(); c.title = yazi; c.cornerStyle = .capsule; c.baseBackgroundColor = Tema.dolguUI; c.baseForegroundColor = Tema.dolguUstuUI; c.attributedTitle = AttributedString(yazi, attributes: AttributeContainer([.font: Tema.uiArayuz(14, 700)])) }
         let b = UIButton(configuration: c, primaryAction: UIAction { _ in eylem() })
         b.accessibilityIdentifier = yazi
         return b
