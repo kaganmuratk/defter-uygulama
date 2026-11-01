@@ -118,6 +118,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     private func kaldigiYereGit() {
         if let h = acilisHedefi { acilisHedefi = nil; if hedefeGit(h) { return } }
+        // Önce "Burada kaldım" sayfası (işaret duruyorsa), yoksa en son çıkılan sayfa
+        let isaretli = durum == "yarim" ? Konum.kaldim(part.id) : nil
+        if let a = isaretli ?? Konum.son(part.id), sayfaVarMi(a) { sayfayaGit(a); return }
         guard let doc = pdfView.document, let sira = IcerikYonetici.ortak.ilerleme[part.id]?.sayfa,
               let i = sayfalar.firstIndex(where: { $0.bolumSira == sira }), let p = doc.page(at: i) else { return }
         pdfView.go(to: p)
@@ -137,7 +140,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let sayfa = pdfView.currentPage
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
             guard let self else { return }
-            self.paneliDegistir(size.width > 1000, animasyon: false)
+            // Yan panel dönüşte kendiliğinden açılıp kapanmaz; yalnız kullanıcı düğmeyle değiştirir
             let sigdir = self.pdfView.scaleFactorForSizeToFit
             self.pdfView.minScaleFactor = sigdir * 0.5
             self.pdfView.maxScaleFactor = sigdir * 5
@@ -194,6 +197,12 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         guard let doc = pdfView.document else { return }
         for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == anahtar { pdfView.go(to: p); return } }
     }
+    private func sayfaVarMi(_ anahtar: String) -> Bool {
+        guard let doc = pdfView.document else { return false }
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == anahtar { return true } }
+        return false
+    }
+    private var anlikAnahtar: String? { pdfView.currentPage.flatMap { anahtarlar[ObjectIdentifier($0)] } }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // İlk yerleşimde: geniş ekranda (yatay iPad) panel açık gelir
@@ -228,6 +237,20 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         dokun.cancelsTouchesInView = false
         pdfView.addGestureRecognizer(dokun)
         NotificationCenter.default.addObserver(self, selector: #selector(sayfaDegisti), name: .PDFViewPageChanged, object: pdfView)
+        NotificationCenter.default.addObserver(self, selector: #selector(olcekDegisti), name: .PDFViewScaleChanged, object: pdfView)
+    }
+
+    // Yakınlaştırma: kalem katmanlarının çözünürlüğü sayfa ölçeğine uyar (pinch bitince, kısa gecikmeyle)
+    private var cozunurlukIsi: DispatchWorkItem?
+    @objc private func olcekDegisti() {
+        cozunurlukIsi?.cancel()
+        let is_ = DispatchWorkItem { [weak self] in self?.cozunurluguUygula() }
+        cozunurlukIsi = is_
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: is_)
+    }
+    private func cozunurluguUygula() {
+        let f = UIScreen.main.scale * max(pdfView.scaleFactor, 1)
+        for k in katmanlar.values { k.cozunurluk(f) }
     }
 
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -245,6 +268,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         k.notSil = { [weak self] id in self?.notSil(id) }
         k.notlariGoster(kayit.notlar.filter { $0.sayfa == anahtar }, gizli: notlarGizli)
         katmanlar[anahtar] = k
+        k.cozunurluk(UIScreen.main.scale * max(pdfView.scaleFactor, 1))
+        let isaretli = durum == "yarim" ? Konum.kaldim(part.id) : nil
+        k.ayrac(anahtar == isaretli)
         return k
     }
 
@@ -318,6 +344,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     @objc private func sayfaDegisti() {
         guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
         panel.secili = anahtar
+        Konum.sonYaz(part.id, anahtar)      // part'tan çıkınca tekrar girince bu sayfaya dönülür
+        kaldimDugmesiniGuncelle()
         guard let b = sayfalar.first(where: { $0.anahtar == anahtar }), let sira = b.bolumSira else { return }
         // Yalnız konum tutulur; "kalınan yer" ve "bitti" yalnız kullanıcı işaretleyince değişir
         IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in
@@ -333,22 +361,34 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private let bitirDugmesi = UIButton(type: .system)
     private var durum: String? { IcerikYonetici.ortak.ilerleme[part.id]?.durum }
 
+    /// "Burada kaldım": işaret şu anki sayfaya konur. İşaret zaten bu sayfadaysa kaldırılır; başka sayfadaysa buraya taşınır.
     private func kaldimDegistir() {
-        let simdi = durum == "yarim"
-        IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = simdi ? nil : "yarim" }
-        bilgiGoster(simdi ? "Kalınan yer kaldırıldı" : "Kalınan yer işaretlendi")
+        guard let a = anlikAnahtar else { return }
+        let burada = durum == "yarim" && Konum.kaldim(part.id) == a
+        if burada {
+            Konum.kaldimYaz(part.id, nil)
+            IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = nil }
+            bilgiGoster("Kalınan yer kaldırıldı")
+        } else {
+            Konum.kaldimYaz(part.id, a)
+            IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = "yarim" }
+            bilgiGoster("Kalınan yer işaretlendi")
+        }
         kaldimDugmesiniGuncelle()
     }
     private func bitirDegistir() {
         let bitti = durum == "bitti"
+        if !bitti { Konum.kaldimYaz(part.id, nil) }
         IcerikYonetici.ortak.ilerlemeYaz(part.id) { i in i.durum = bitti ? nil : "bitti" }
         bilgiGoster(bitti ? "Bitti işareti kaldırıldı" : "Part bitti olarak işaretlendi")
         bitirDugmesiniGuncelle(); kaldimDugmesiniGuncelle()
     }
     private func kaldimDugmesiniGuncelle() {
-        let dolu = durum == "yarim"
-        kaldimDugmesi.setImage(UIImage(systemName: dolu ? "bookmark.fill" : "bookmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
-        kaldimDugmesi.toolTip = dolu ? "Kalınan yeri kaldır" : "Burada kaldım"
+        let isaretli = durum == "yarim" ? Konum.kaldim(part.id) : nil
+        let burada = isaretli != nil && isaretli == anlikAnahtar
+        kaldimDugmesi.setImage(UIImage(systemName: burada ? "bookmark.fill" : "bookmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
+        kaldimDugmesi.toolTip = burada ? "Kalınan yeri kaldır" : (isaretli != nil ? "Kalınan yeri buraya taşı" : "Burada kaldım")
+        for (anahtar, k) in katmanlar { k.ayrac(anahtar == isaretli) }   // işaretli sayfanın köşesinde ayraç şeridi
     }
     private func kurBitirDugmesi() {
         var c = UIButton.Configuration.filled()
@@ -703,6 +743,39 @@ final class SayfaKatmani: UIView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// PDF görünümü sayfayı büyütünce kalem katmanı da bu oranda yüksek çözünürlükte çizilir (yoksa yazılan çizgi bulanık kalır).
+    /// Bellek için tuval başına piksel sayısı sınırlıdır.
+    private var cozunurlukOrani: CGFloat = 0
+    func cozunurluk(_ istenen: CGFloat) {
+        let alan = max(bounds.width * bounds.height, 1)
+        let tavan = (12_000_000 / alan).squareRoot()
+        let f = max(UIScreen.main.scale, min(istenen, tavan))
+        if abs(f - cozunurlukOrani) < 0.15 { return }
+        cozunurlukOrani = f
+        func uygula(_ v: UIView) { v.contentScaleFactor = f; v.subviews.forEach(uygula) }
+        uygula(tuval)
+        tuval.setNeedsDisplay()
+    }
+
+    /// "Burada kaldım" ayracı: sayfanın sağ üst köşesinde küçük renkli şerit (yalnız işaretli sayfada)
+    private var ayracGorunumu: UIImageView?
+    func ayrac(_ goster: Bool) {
+        if !goster { ayracGorunumu?.isHidden = true; return }
+        if ayracGorunumu == nil {
+            let v = UIImageView(image: UIImage(systemName: "bookmark.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 46, weight: .regular)))
+            v.tintColor = Tema.vurguUI
+            v.contentMode = .scaleAspectFit
+            v.frame = CGRect(x: bounds.width - 76, y: 0, width: 34, height: 52)
+            v.autoresizingMask = [.flexibleLeftMargin]
+            v.isUserInteractionEnabled = false
+            v.accessibilityIdentifier = "ayrac"
+            addSubview(v)
+            ayracGorunumu = v
+        }
+        ayracGorunumu?.isHidden = false
+        bringSubviewToFront(ayracGorunumu!)
+    }
 
     func notlariGoster(_ notlar: [YapiskanNot], gizli: Bool) {
         for r in rozetler.values { r.removeFromSuperview() }
