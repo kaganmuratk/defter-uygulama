@@ -200,7 +200,7 @@ final class KalemSinavi: XCTestCase {
         app.buttons["arac-metin"].tap()
         nokta(0.50, 0.60).tap()
         sleep(2)
-        if app.keyboards.count > 0 { app.typeText("Merhaba dünya") }
+        // Sayfa katmanı erişilebilirlikte görünmediği için klavye odağı sorgulanamaz; yalnız ekran görüntüsü alınır
         sleep(1); cek("t5-yazi-kutusu")
         XCTAssertTrue(app.buttons["arac-metin"].exists)
     }
