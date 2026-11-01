@@ -96,6 +96,7 @@ struct KutuphaneEkrani: View {
     @State private var adIstegi: AdIstegi?
     @State private var silIstegi: SilIstegi?
     @State private var pdfSec = false
+    @ObservedObject private var yedek = Yedek.ortak
 
     var body: some View {
         NavigationStack {
@@ -104,6 +105,7 @@ struct KutuphaneEkrani: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 26) {
                         ust
+                        if !yedek.klasorVar && !icerik.kendi.isEmpty && !Ayar.ornek { yedekUyarisi }
                         if genis {
                             HStack(alignment: .top, spacing: 38) {
                                 bolumPaneli.frame(width: min(640, g.size.width * 0.52))
@@ -148,6 +150,21 @@ struct KutuphaneEkrani: View {
             }
             .buttonStyle(.plain).accessibilityIdentifier("ayarlar")
         }
+    }
+
+    // Yedek seçilmemişken kendi kitap/not varsa küçük hatırlatma
+    private var yedekUyarisi: some View {
+        Button { ayarAcik = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "icloud.slash").font(.system(size: 17, weight: .medium))
+                Text("Yedek kapalı: kendi kitapların ve notların yalnız bu iPad'de. Ayarlar → Yedek'ten bir klasör seç.")
+                    .font(Tema.yazi(14, .medium)).multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(Tema.murekkep).padding(.horizontal, 18).padding(.vertical, 14).camYuzey(20)
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("yedekUyari")
     }
 
     // Sol panel: kalınan yerin bölümü ve part listesi
@@ -528,6 +545,9 @@ struct AyarEkrani: View {
     @EnvironmentObject var senkron: Senkron
     @Environment(\.dismiss) private var kapat
     @AppStorage("tema") private var tema = TemaSecimi.otomatik.rawValue
+    @ObservedObject private var yedek = Yedek.ortak
+    @State private var klasorSecimi = false
+    @State private var geriOnay = false
     @State private var anahtar = ""
     @State private var tani: [String] = Tani.kayitlar
     var body: some View {
@@ -542,6 +562,22 @@ struct AyarEkrani: View {
                 Section("Eşitleme") {
                     LabeledContent("Durum", value: senkron.durum)
                     Button("Şimdi eşitle") { Task { await icerik.indir(); await senkron.hepsi() } }
+                }
+                Section("Yedek") {
+                    LabeledContent("Klasör", value: yedek.klasorVar ? yedek.klasorAdi : "seçilmedi")
+                    if yedek.klasorVar, yedek.bulutta == false {
+                        Text("Bu klasör iCloud Drive içinde görünmüyor. iPad bozulur ya da kaybolursa yedek de gidebilir. Dosyalar → iCloud Drive içinde bir klasör seçmeni öneririm.")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                    Button(yedek.klasorVar ? "Yedek klasörünü değiştir" : "Yedek klasörü seç") { klasorSecimi = true }
+                        .accessibilityIdentifier("yedekKlasorSec")
+                    if yedek.klasorVar {
+                        Button("Şimdi yedekle") { yedek.simdi() }.disabled(yedek.calisiyor)
+                        Button("Yedekten geri yükle") { geriOnay = true }.disabled(yedek.calisiyor)
+                    }
+                    if !yedek.durum.isEmpty { Text(yedek.durum).font(.footnote).foregroundStyle(.secondary) }
+                    Text("Kendi kitapların, çizimlerin ve notların seçtiğin klasöre kopyalanır; kaydettikçe ve uygulamadan çıkarken kendiliğinden güncellenir. Hazır kitaplar internetten yeniden iner.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Çevrimdışı kopya") {
                     Text(icerik.indirme.isEmpty ? (UserDefaults.standard.string(forKey: "indirme") ?? "Henüz indirilmedi; internet olunca kendiliğinden iner.") : icerik.indirme)
@@ -558,6 +594,11 @@ struct AyarEkrani: View {
             }
             .navigationTitle("Ayarlar")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Bitti") { kapat() } } }
+            .fileImporter(isPresented: $klasorSecimi, allowedContentTypes: [.folder], onCompletion: yedek.klasorSec)
+            .alert("Yedekten geri yüklensin mi?", isPresented: $geriOnay) {
+                Button("Geri yükle") { yedek.geriYukle() }
+                Button("Vazgeç", role: .cancel) {}
+            } message: { Text("Yedekteki kitaplar ve notlar cihaza eklenir. Cihazdaki daha yeni çalışmalar silinmez.") }
         }
     }
 }

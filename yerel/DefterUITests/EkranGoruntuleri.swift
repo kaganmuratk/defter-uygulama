@@ -128,3 +128,16 @@ final class EkranGoruntuleri: XCTestCase {
         cek("k6-okuyucu")
     }
 }
+
+// Yedek mantığı: geçici klasörlerde yedekle → sil → geri yükle → karşılaştır (uygulama kendi sınavını çalıştırır)
+final class YedekSinavi: XCTestCase {
+    func testYedekGeriYukleme() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-yedekTesti"]
+        app.launch()
+        let sonuc = app.staticTexts["yedek-sonuc"]
+        XCTAssertTrue(sonuc.waitForExistence(timeout: 20))
+        let ek = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); ek.name = "yedek-sinavi"; ek.lifetime = .keepAlways; add(ek)
+        XCTAssertEqual(sonuc.label, "YEDEK-TEST: TAMAM")
+    }
+}

@@ -54,7 +54,7 @@ enum KendiDepo {
 extension IcerikYonetici {
     var dersler: [Ders] { (plan?.dersler ?? []) + kendi }
 
-    func kendiKaydet() { if !Ayar.ornek { Depo.yaz(kendi, KendiDepo.kitapURL) } }
+    func kendiKaydet() { if !Ayar.ornek { Depo.yaz(kendi, KendiDepo.kitapURL); Yedek.ortak.planla() } }
     private func degistir(_ dersId: String, _ f: (inout Ders) -> Void) {
         guard let i = kendi.firstIndex(where: { $0.id == dersId }) else { return }
         f(&kendi[i]); kendiKaydet()

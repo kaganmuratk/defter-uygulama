@@ -463,6 +463,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if !Ayar.ornek {
             if Depo.yaz(kayit, Depo.kayitURL(part.id)) { try? FileManager.default.removeItem(at: Depo.taslakURL(part.id)) }
             Senkron.ortak.partKaydedildi(part.id)
+            Yedek.ortak.planla()
         }
         kirli = false
         bilgiGoster("Kaydedildi")

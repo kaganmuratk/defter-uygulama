@@ -17,6 +17,7 @@ struct DefterUygulamasi: App {
                 .preferredColorScheme(TemaSecimi(rawValue: tema)?.sema)
         }
         .onChange(of: evre) { _, yeni in
+            if yeni == .background { Yedek.ortak.simdi(); return }
             guard yeni == .active else { return }
             Task { await icerik.indir(); await senkron.hepsi() }
         }
@@ -27,7 +28,8 @@ struct KokEkran: View {
     @EnvironmentObject var icerik: IcerikYonetici
     var body: some View {
         Group {
-            if icerik.anahtarGerekli && !Ayar.ornek { AnahtarEkrani() }
+            if ProcessInfo.processInfo.arguments.contains("-yedekTesti") { YedekSinavEkrani() }
+            else if icerik.anahtarGerekli && !Ayar.ornek { AnahtarEkrani() }
             else { KutuphaneEkrani() }
         }
         .task { await icerik.indir(); await Senkron.ortak.hepsi() }
