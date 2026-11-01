@@ -7,7 +7,7 @@ import SwiftUI
 // Yakınlaştırma, kaydırma, avuç reddi, kalem türleri/renk/kalınlık/silgi (PKToolPicker) Apple'dan hazır gelir.
 // Kullanıcı verisi (çizimler, yapışkan notlar, eklenen sayfalar) PartKaydi'nde; çıkarken "kaydedilsin mi?" sorulur,
 // arada taslak dosyasına yazılır (uygulama kapansa da kaybolmaz).
-final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanvasViewDelegate, PKToolPickerObserver, UIPencilInteractionDelegate {
+final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanvasViewDelegate, UIPencilInteractionDelegate {
     let partOzet: PartOzet
     let part: Part
     var kapat: (() -> Void)?
@@ -18,8 +18,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private let ustCubuk = UIView()
     private let baslikEtiket = UILabel()
     private let yukleniyor = UIActivityIndicatorView(style: .large)
-    private let toolPicker = PKToolPicker()
-    private let paletSahibi = PaletSahibi()
+    private let kalemCubugu = KalemCubugu()
     private var sayfalar: [SayfaBilgi] = []                  // belge sırasıyla
     private var anahtarlar: [ObjectIdentifier: String] = [:]  // PDFPage → sayfa anahtarı
     private var katmanlar: [String: SayfaKatmani] = [:]       // görünen sayfaların katmanları
@@ -37,10 +36,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // Pencil: çift dokunuş/sıkıştırma ile silgiye geçilmişse kalem ekrandan kalkınca önceki araca dön (Kağan'ın istediği davranış)
     private var ciftDokunusSilgisi = false
-    private var oncekiArac: PKTool = PKInkingTool(.pen, color: .label, width: 3)
-    private var sonAracDegisimi: Date = .distantPast
-    private var aracDegisimOncesi: PKTool?
-    private var gecerliArac: PKTool = PKInkingTool(.pen, color: .label, width: 3)
+    private var oncekiArac: KalemCubugu.Arac = .kalem
 
     private lazy var kaldimDugmesi = ikonDugme("bookmark", ad: "Burada kaldım") { [weak self] in self?.kaldimDegistir() }
     private lazy var kaydetDugmesi = ustDugme("Kaydet", sembol: nil) { [weak self] in self?.kaydet() }
@@ -72,7 +68,6 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (k: OkuyucuKontrol, _: UITraitCollection) in
             k.pilKenarlari()
         }
-        view.addSubview(paletSahibi)
         yukleniyor.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(yukleniyor)
         NSLayoutConstraint.activate([yukleniyor.centerXAnchor.constraint(equalTo: view.centerXAnchor), yukleniyor.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
@@ -80,9 +75,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let kalem = UIPencilInteraction()
         kalem.delegate = self
         view.addInteraction(kalem)
-        toolPicker.addObserver(self)
-        toolPicker.selectedTool = gecerliArac
-        if #available(iOS 18.0, *) { toolPicker.showsDrawingPolicyControls = false }
+        kurKalemCubugu()
         Senkron.ortak.acikPart = part.id
     }
 
@@ -250,7 +243,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
     private func cozunurluguUygula() {
         let f = UIScreen.main.scale * max(pdfView.scaleFactor, 1)
-        for k in katmanlar.values { k.cozunurluk(f) }
+        for k in katmanlar.values { k.cozunurluk(f); k.secim.olcek = max(pdfView.scaleFactor, 0.3) }
     }
 
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -258,11 +251,14 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if let k = katmanlar[anahtar] { return k }
         let k = SayfaKatmani(anahtar: anahtar, sayfaBoyu: page.bounds(for: .mediaBox).size)
         k.tuval.delegate = self
-        k.tuval.drawingPolicy = Ayar.ornek ? .anyInput : .pencilOnly
-        k.tuval.tool = gecerliArac
+        k.tuval.drawingPolicy = (Ayar.ornek || kalemCubugu.parmakla) ? .anyInput : .pencilOnly
+        k.tuval.tool = kalemCubugu.pkArac
+        k.tuval.isRulerActive = kalemCubugu.cetvel
+        k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec
+        k.secim.etkin = kalemCubugu.arac == .sec
+        k.secim.olcek = max(pdfView.scaleFactor, 0.3)
+        k.cizimDegisti = { [weak self, weak k] in guard let self, let k else { return }; self.cizimiAl(k); self.kirli = true; self.taslakPlanla() }
         if let d = kayit.cizimler[anahtar], let cizim = try? PKDrawing(data: d) { k.tuval.drawing = cizim }
-        toolPicker.addObserver(k.tuval)
-        toolPicker.setVisible(paletAcik, forFirstResponder: k.tuval)
         k.notAc = { [weak self] id in self?.notuAc(id) }
         k.notTasindi = { [weak self] id, nokta in self?.notTasi(id, nokta) }
         k.notSil = { [weak self] id in self?.notSil(id) }
@@ -277,7 +273,6 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
         guard let k = overlayView as? SayfaKatmani else { return }
         cizimiAl(k)
-        toolPicker.removeObserver(k.tuval)
         katmanlar[k.anahtar] = nil
     }
 
@@ -288,7 +283,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // MARK: Çizim olayları
     func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-        guard let k = canvasView.superview as? SayfaKatmani else { return }
+        guard let k = canvasView.superview as? SayfaKatmani, !k.secimSuruyor else { return }
         // Kayıtlı çizim sayfaya yüklenirken de bu olay gelir; içerik kayıttakiyle aynıysa "değişti" sayma
         let eski = kayit.cizimler[k.anahtar].flatMap { try? PKDrawing(data: $0) } ?? PKDrawing()
         if canvasView.drawing.dataRepresentation() == eski.dataRepresentation() { return }
@@ -297,23 +292,44 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         taslakPlanla()
     }
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
-        if ciftDokunusSilgisi, gecerliArac is PKEraserTool {
+        if ciftDokunusSilgisi, kalemCubugu.arac == .silgi {
             ciftDokunusSilgisi = false
-            aracSec(oncekiArac)
+            kalemCubugu.sec(oncekiArac)
         }
     }
 
-    func toolPickerSelectedToolDidChange(_ toolPicker: PKToolPicker) {
-        aracDegisimOncesi = gecerliArac
-        gecerliArac = toolPicker.selectedTool
-        sonAracDegisimi = Date()
-        for k in katmanlar.values { k.tuval.tool = gecerliArac }
+    // MARK: Kendi kalem çubuğu
+    private func kurKalemCubugu() {
+        kalemCubugu.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(kalemCubugu)
+        NSLayoutConstraint.activate([
+            kalemCubugu.centerXAnchor.constraint(equalTo: pdfView.centerXAnchor),
+            kalemCubugu.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            kalemCubugu.leadingAnchor.constraint(greaterThanOrEqualTo: pdfView.leadingAnchor, constant: 12),
+            kalemCubugu.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+        ])
+        kalemCubugu.aracDegisti = { [weak self] in self?.aracUygula() }
+        kalemCubugu.geriAl = { [weak self] in self?.kendiGeriAlma.undo() }
+        kalemCubugu.yinele = { [weak self] in self?.kendiGeriAlma.redo() }
+        kalemCubugu.cetvelDegisti = { [weak self] acik in self?.katmanlar.values.forEach { $0.tuval.isRulerActive = acik } }
+        kalemCubugu.parmakDegisti = { [weak self] acik in self?.katmanlar.values.forEach { $0.tuval.drawingPolicy = acik ? .anyInput : .pencilOnly } }
+        kalemCubugu.yapistirilabilir = { !SecimPanosu.kopya.isEmpty }
+        kalemCubugu.yapistir = { [weak self] in self?.kopyayiYapistir() }
+        kalemCubugu.isHidden = !paletAcik
     }
-
-    private func aracSec(_ arac: PKTool) {
-        toolPicker.selectedTool = arac
-        gecerliArac = arac
-        for k in katmanlar.values { k.tuval.tool = arac }
+    private func aracUygula() {
+        for k in katmanlar.values {
+            k.tuval.tool = kalemCubugu.pkArac
+            k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec
+            k.secim.etkin = kalemCubugu.arac == .sec
+        }
+    }
+    private func kopyayiYapistir() {
+        guard let p = pdfView.currentPage, let a = anahtarlar[ObjectIdentifier(p)], let k = katmanlar[a] else { return }
+        kalemCubugu.sec(.sec)
+        let m = pdfView.convert(CGPoint(x: pdfView.bounds.midX, y: pdfView.bounds.midY), to: p)
+        let boy = p.bounds(for: .mediaBox)
+        k.secim.yapistir(merkez: CGPoint(x: m.x, y: boy.height - m.y))   // PDF koordinatı (alt-sol) → katman (üst-sol)
     }
 
     // MARK: Apple Pencil çift dokunuş / Pro sıkıştırma
@@ -325,19 +341,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if squeeze.phase == .ended { kalemDokunusu() }
     }
     private func kalemDokunusu() {
-        let once = gecerliArac
-        // Sistem (araç paleti) dokunuşu kendisi işlediyse ikinci kez çevirme; yalnız "kalkınca dön" bayrağını kur
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
-            if Date().timeIntervalSince(self.sonAracDegisimi) < 0.4 {
-                if self.gecerliArac is PKEraserTool { self.oncekiArac = self.aracDegisimOncesi ?? once; self.ciftDokunusSilgisi = true }
-                else { self.ciftDokunusSilgisi = false }
-                return
-            }
-            if self.gecerliArac is PKEraserTool { self.ciftDokunusSilgisi = false; self.aracSec(self.oncekiArac) }
-            else { self.oncekiArac = self.gecerliArac; self.ciftDokunusSilgisi = true; self.aracSec(PKEraserTool(.bitmap)) }
-            self.bilgiGoster(self.gecerliArac is PKEraserTool ? "Silgi" : "Kalem")
-        }
+        if kalemCubugu.arac == .silgi { ciftDokunusSilgisi = false; kalemCubugu.sec(oncekiArac) }
+        else { oncekiArac = kalemCubugu.arac; ciftDokunusSilgisi = true; kalemCubugu.sec(.silgi) }
+        bilgiGoster(kalemCubugu.arac == .silgi ? "Silgi" : "Kalem")
     }
 
     // MARK: İlerleme
@@ -404,7 +410,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         view.addSubview(bitirDugmesi)
         NSLayoutConstraint.activate([
             bitirDugmesi.centerXAnchor.constraint(equalTo: pdfView.centerXAnchor),
-            bitirDugmesi.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -22),
+            bitirDugmesi.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -88),
         ])
     }
     private func bitirDugmesiniGuncelle() {
@@ -485,8 +491,6 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
     private func temizle() {
         Senkron.ortak.acikPart = nil
-        toolPicker.setVisible(false, forFirstResponder: paletSahibi)
-        for k in katmanlar.values { toolPicker.setVisible(false, forFirstResponder: k.tuval) }
     }
 
     // MARK: Ek sayfalar
@@ -584,9 +588,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     // MARK: Araç paleti
     private func paletiGoster(_ acik: Bool) {
         paletAcik = acik
-        toolPicker.setVisible(acik, forFirstResponder: paletSahibi)
-        for k in katmanlar.values { toolPicker.setVisible(acik, forFirstResponder: k.tuval) }
-        if acik { paletSahibi.becomeFirstResponder() }
+        kalemCubugu.isHidden = !acik
     }
 
     // MARK: Üst çubuk
@@ -726,6 +728,9 @@ final class PaletSahibi: UIView {
 final class SayfaKatmani: UIView {
     let anahtar: String
     let tuval = PKCanvasView()
+    var secimSuruyor = false                 // seçim aracı çizimi değiştirirken kayıt olayı bastırılır
+    var cizimDegisti: (() -> Void)?          // seçim aracı işini bitirince okuyucuya haber
+    lazy var secim = SecimKontrol(katman: self)
     var notAc: ((String) -> Void)?
     var notTasindi: ((String, CGPoint) -> Void)?
     var notSil: ((String) -> Void)?
