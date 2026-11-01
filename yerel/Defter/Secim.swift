@@ -62,6 +62,12 @@ final class SecimKontrol: NSObject {
     private var toplamOlcek: CGFloat = 1
     private var sabitNokta = CGPoint.zero
     private var sonUzaklik: CGFloat = 1
+    // Taşırken seçili çizgiler tuvalden ayrılıp görüntü olarak (GPU ile) taşınır; bırakınca bir kez uygulanır
+    private var hayalGorunum: UIImageView?
+    private var hayalMerkez = CGPoint.zero
+    private var canliDonusum = CGAffineTransform.identity
+    private var ayrilanCizgiler: [PKStroke] = []
+    private var cubukGenisligi: CGFloat = 200
 
     /// PDF yakınlaştırma oranı: kutu ve çubuk ekranda hep aynı boyda kalsın diye ters ölçeklenir
     var olcek: CGFloat = 1 { didSet { kutu.olcek = olcek; if !secili.isEmpty { cubuguYerlestir() } } }
@@ -190,11 +196,11 @@ final class SecimKontrol: NSObject {
         k.bringSubviewToFront(cubuk)
         cubuguYerlestir()
     }
-    private func cubuguYerlestir() {
+    private func cubuguYerlestir(olc: Bool = true) {
         guard let k = katman, kutu.superview != nil else { return }
         cubuk.transform = .identity
-        let genislik = cubukSira.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + 16
-        cubuk.bounds = CGRect(origin: .zero, size: CGSize(width: max(genislik, 200), height: 44))
+        if olc { cubukGenisligi = cubukSira.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + 16 }
+        cubuk.bounds = CGRect(origin: .zero, size: CGSize(width: max(cubukGenisligi, 200), height: 44))
         let ters = 1 / max(olcek, 0.3)
         var cy = kutu.frame.minY - (30 + 14) * ters
         if cy < 24 * ters { cy = kutu.frame.maxY + (30 + 14) * ters }
@@ -244,17 +250,52 @@ final class SecimKontrol: NSObject {
         default: break
         }
     }
-    private func hareketBasla() { hareketOncesi = katman?.tuval.drawing; katman?.secimSuruyor = true; toplamOlcek = 1 }
-    private func donustur(_ T: CGAffineTransform) {
+    private func hareketBasla() {
         guard let k = katman else { return }
+        hareketOncesi = k.tuval.drawing
+        k.secimSuruyor = true
+        toplamOlcek = 1
+        canliDonusum = .identity
+        let tum = k.tuval.drawing.strokes
+        ayrilanCizgiler = secili.filter { $0 < tum.count }.map { tum[$0] }
+        guard let r = sinirlar() else { return }
         var d = k.tuval.drawing
-        for i in secili where i < d.strokes.count { d.strokes[i].transform = d.strokes[i].transform.concatenating(T) }
-        k.tuval.drawing = d
+        for i in secili.sorted(by: >) where i < d.strokes.count { d.strokes.remove(at: i) }
+        k.tuval.drawing = d                     // seçili çizgiler tuvalden çıkar (tek seferlik güncelleme)
+        let alan = r.insetBy(dx: -6, dy: -6)
+        var resim = UIImage()
+        let oran = UIScreen.main.scale * min(max(olcek, 1), 4)
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent { resim = PKDrawing(strokes: ayrilanCizgiler).image(from: alan, scale: oran) }
+        let v = UIImageView(image: resim)
+        v.frame = alan; v.isUserInteractionEnabled = false
+        k.insertSubview(v, belowSubview: kutu)
+        hayalGorunum = v
+        hayalMerkez = CGPoint(x: alan.midX, y: alan.midY)
+    }
+    private func donustur(_ T: CGAffineTransform) {
+        canliDonusum = canliDonusum.concatenating(T)
+        if let v = hayalGorunum {
+            let L = canliDonusum
+            v.transform = CGAffineTransform(a: L.a, b: L.b, c: L.c, d: L.d, tx: 0, ty: 0)
+            v.center = hayalMerkez.applying(L)
+        }
         kutu.frame = kutu.frame.applying(T)
-        cubuguYerlestir()
+        cubuguYerlestir(olc: false)
     }
     private func hareketBitir() {
         guard let k = katman else { return }
+        var d = k.tuval.drawing
+        var yeniler: [Int] = []
+        for s in ayrilanCizgiler {
+            var n = s
+            n.transform = s.transform.concatenating(canliDonusum)
+            d.strokes.append(n)
+            yeniler.append(d.strokes.count - 1)
+        }
+        k.tuval.drawing = d
+        hayalGorunum?.removeFromSuperview(); hayalGorunum = nil
+        ayrilanCizgiler = []
+        secili = yeniler
         k.secimSuruyor = false
         if let o = hareketOncesi { geriAlmaKaydet(o) }
         hareketOncesi = nil

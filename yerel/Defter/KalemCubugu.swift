@@ -25,6 +25,8 @@ final class KalemCubugu: UIView {
     private(set) var cetvel = false
     private(set) var parmakla = false
     private(set) var silgiVektor = false
+    private(set) var silgiBoyu: CGFloat = 22
+    private let silgiModu = UISegmentedControl(items: ["Parça sil", "Çizgiyi sil"])
     private var renkSira: [Arac: Int] = [.kalem: 0, .fosforlu: 0]
     private var kalinlik: [Arac: CGFloat] = [.kalem: 3, .fosforlu: 18]
     private let kalinlikAraligi: [Arac: ClosedRange<Float>] = [.kalem: 1...14, .fosforlu: 8...44]
@@ -50,7 +52,7 @@ final class KalemCubugu: UIView {
         switch arac {
         case .kalem, .sec, .metin: return PKInkingTool(.pen, color: renk(.kalem), width: kalinlik[.kalem] ?? 3)
         case .fosforlu: return PKInkingTool(.marker, color: renk(.fosforlu), width: kalinlik[.fosforlu] ?? 18)
-        case .silgi: return silgiVektor ? PKEraserTool(.vector) : PKEraserTool(.bitmap)
+        case .silgi: return silgiVektor ? PKEraserTool(.vector) : PKEraserTool(.bitmap, width: silgiBoyu)
         }
     }
     func renk(_ a: Arac) -> UIColor {
@@ -103,7 +105,16 @@ final class KalemCubugu: UIView {
         renkSatiri.axis = .horizontal; renkSatiri.spacing = 10; renkSatiri.alignment = .center
         kalinlikCubugu.addAction(UIAction { [weak self] _ in self?.kalinlikDegisti() }, for: .valueChanged)
         kalinlikCubugu.accessibilityIdentifier = "kalemKalinlik"
-        let ayarSira = UIStackView(arrangedSubviews: [renkSatiri, kalinlikCubugu])
+        silgiModu.selectedSegmentIndex = 0
+        silgiModu.accessibilityIdentifier = "silgi-modu"
+        silgiModu.isHidden = true
+        silgiModu.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.silgiVektor = self.silgiModu.selectedSegmentIndex == 1
+            self.kalinlikCubugu.isEnabled = !self.silgiVektor
+            self.aracDegisti?(); self.ayarGizlemeyiPlanla()
+        }, for: .valueChanged)
+        let ayarSira = UIStackView(arrangedSubviews: [renkSatiri, silgiModu, kalinlikCubugu])
         ayarSira.axis = .vertical; ayarSira.spacing = 12; ayarSira.alignment = .fill
         ayarSira.translatesAutoresizingMaskIntoConstraints = false
         ayarPaneli.contentView.addSubview(ayarSira)
@@ -153,7 +164,7 @@ final class KalemCubugu: UIView {
 
     // MARK: Davranış
     private func dokunuldu(_ a: Arac) {
-        if a == arac, a == .kalem || a == .fosforlu { ayarPaneliniAc(); return }
+        if a == arac, a == .kalem || a == .fosforlu || a == .silgi { ayarPaneliniAc(); return }
         sec(a)
     }
     func sec(_ a: Arac) {
@@ -180,9 +191,22 @@ final class KalemCubugu: UIView {
         renkDaire.layer.borderColor = Tema.camKenarUI.resolvedColor(with: traitCollection).cgColor
     }
 
+    /// Silgi paneli: parça silme / çizgiyi tamamen silme + boyut
+    private func silgiPaneliniAc() {
+        renkSatiri.isHidden = true; silgiModu.isHidden = false
+        silgiModu.selectedSegmentIndex = silgiVektor ? 1 : 0
+        kalinlikCubugu.minimumValue = 6; kalinlikCubugu.maximumValue = 60
+        kalinlikCubugu.value = Float(silgiBoyu)
+        kalinlikCubugu.isEnabled = !silgiVektor
+        kalinlikCubugu.tintColor = Tema.vurguUI
+        ayarGoster(true)
+        ayarGizlemeyiPlanla()
+    }
     private func ayarPaneliniAc() {
+        if arac == .silgi { silgiPaneliniAc(); return }
         let a: Arac = arac == .fosforlu ? .fosforlu : .kalem
-        if arac == .silgi || arac == .sec { sec(a) }
+        if arac == .sec { sec(a) }
+        renkSatiri.isHidden = false; silgiModu.isHidden = true; kalinlikCubugu.isEnabled = true
         renkSatiri.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (i, (ad, hex)) in KalemPaleti.renkler(a).enumerated() {
             let b = UIButton(type: .custom)
@@ -218,6 +242,7 @@ final class KalemCubugu: UIView {
         guncelle(); ayarPaneliniAc(); aracDegisti?()
     }
     private func kalinlikDegisti() {
+        if arac == .silgi { silgiBoyu = CGFloat(kalinlikCubugu.value); aracDegisti?(); ayarGizlemeyiPlanla(); return }
         let a: Arac = arac == .fosforlu ? .fosforlu : .kalem
         kalinlik[a] = CGFloat(kalinlikCubugu.value)
         aracDegisti?()
@@ -239,7 +264,7 @@ final class KalemCubugu: UIView {
                 guard let self else { return }; self.parmakla.toggle(); self.parmakDegisti?(self.parmakla)
             },
             UIAction(title: "Silgi: çizgiyi tamamen sil", image: UIImage(systemName: "eraser.line.dashed"), state: silgiVektor ? .on : .off) { [weak self] _ in
-                guard let self else { return }; self.silgiVektor.toggle(); self.aracDegisti?()
+                guard let self else { return }; self.silgiVektor.toggle(); self.silgiModu.selectedSegmentIndex = self.silgiVektor ? 1 : 0; self.aracDegisti?()
             },
         ]
         if yapistirilabilir?() == true {

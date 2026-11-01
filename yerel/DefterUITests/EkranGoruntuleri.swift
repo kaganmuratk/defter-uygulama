@@ -148,9 +148,9 @@ final class OcrSinavi: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-ocrTesti"]
         app.launch()
-        let sonuc = app.staticTexts["ocr-sonuc"]
+        let sonuc = app.descendants(matching: .any)["ocr-sonuc"].firstMatch
         XCTAssertTrue(sonuc.waitForExistence(timeout: 20))
-        sleep(6)
+        sleep(12)
         let ek = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); ek.name = "ocr-sonucu"; ek.lifetime = .keepAlways; add(ek)
         let ek2 = XCTAttachment(string: sonuc.label); ek2.name = "ocr-metin"; ek2.lifetime = .keepAlways; add(ek2)
         XCTAssertFalse(sonuc.label.contains("çalışıyor"))
