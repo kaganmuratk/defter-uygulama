@@ -95,6 +95,7 @@ struct KutuphaneEkrani: View {
     @State private var ayarAcik = false
     @State private var adIstegi: AdIstegi?
     @State private var silIstegi: SilIstegi?
+    @State private var pdfSec = false
 
     var body: some View {
         NavigationStack {
@@ -124,6 +125,7 @@ struct KutuphaneEkrani: View {
         }
         .sheet(isPresented: $ayarAcik) { AyarEkrani() }
         .adSorusu($adIstegi).silOnayi($silIstegi)
+        .fileImporter(isPresented: $pdfSec, allowedContentTypes: [.pdf], onCompletion: pdfAl)
         .fullScreenCover(isPresented: Binding(get: { acikPart != nil }, set: { if !$0 { acikPart = nil } })) {
             if let acik = acikPart {
                 OkuyucuEkrani(partOzet: acik.0, part: acik.1, kapat: { acikPart = nil; acikHedef = nil },
@@ -167,23 +169,52 @@ struct KutuphaneEkrani: View {
             HStack {
                 Etiket(yazi: "Kitaplar")
                 Spacer()
-                Button { adIstegi = AdIstegi(baslik: "Yeni kitap", ilk: "") { icerik.kitapEkle($0) } } label: { EkleDugmesi(ad: "Yeni kitap") }
-                    .buttonStyle(.plain).accessibilityIdentifier("yeniKitap")
+                // Kendi kitabın: bölüm/part yok; boş defter (sayfa deseni seç) ya da PDF. Sayfalar alt alta, yukarı-aşağı kayar.
+                Menu {
+                    Button { yeniDefter("cizgili") } label: { Label("Çizgili defter", systemImage: "line.3.horizontal") }
+                    Button { yeniDefter("kareli") } label: { Label("Kareli defter", systemImage: "squareshape.split.3x3") }
+                    Button { yeniDefter("noktali") } label: { Label("Noktalı defter", systemImage: "circle.grid.3x3") }
+                    Button { yeniDefter("duz") } label: { Label("Düz defter", systemImage: "doc") }
+                    Divider()
+                    Button { pdfSec = true } label: { Label("PDF kitap ekle", systemImage: "square.and.arrow.down") }
+                } label: { EkleDugmesi(ad: "Yeni kitap") }
+                    .accessibilityIdentifier("yeniKitap")
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 250), spacing: 24, alignment: .top)], alignment: .leading, spacing: 28) {
                 ForEach(Array(dersler.enumerated()), id: \.element.id) { i, d in
-                    NavigationLink(value: d) { KitapKarti(ders: d, sira: i) }
-                        .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
-                        .contextMenu {
-                            if d.id.hasPrefix("k-") {
-                                Button { adIstegi = AdIstegi(baslik: "Kitabın adı", ilk: d.baslik) { icerik.kitapAdi(d.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
-                                Button(role: .destructive) { silIstegi = SilIstegi(ad: d.baslik) { icerik.kitapSil(d.id) } } label: { Label("Sil", systemImage: "trash") }
-                            }
-                        }
+                    kitapOgesi(d, i)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Kendi kitap tek part'lıysa doğrudan okuyucuda açılır; hazır kitaplar (ve eski çok partlı kendi kitaplar) bölüm ekranına gider
+    @ViewBuilder private func kitapOgesi(_ d: Ders, _ i: Int) -> some View {
+        if let p = icerik.tekPart(d) {
+            Button { ac(p) } label: { KitapKarti(ders: d, sira: i) }
+                .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
+                .contextMenu { kitapMenusu(d) }
+        } else {
+            NavigationLink(value: d) { KitapKarti(ders: d, sira: i) }
+                .buttonStyle(.plain).accessibilityIdentifier("kitap-" + d.id)
+                .contextMenu { kitapMenusu(d) }
+        }
+    }
+    @ViewBuilder private func kitapMenusu(_ d: Ders) -> some View {
+        if d.id.hasPrefix("k-") {
+            Button { adIstegi = AdIstegi(baslik: "Kitabın adı", ilk: d.baslik) { icerik.kitapAdi(d.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+            Button(role: .destructive) { silIstegi = SilIstegi(ad: d.baslik) { icerik.kitapSil(d.id) } } label: { Label("Sil", systemImage: "trash") }
+        }
+    }
+    private func yeniDefter(_ desen: String) {
+        adIstegi = AdIstegi(baslik: "Yeni defter", ilk: "") { icerik.kendiKitapOlustur($0, desen: desen) }
+    }
+    private func pdfAl(_ sonuc: Result<URL, Error>) {
+        guard case .success(let u) = sonuc else { return }
+        let eris = u.startAccessingSecurityScopedResource()
+        defer { if eris { u.stopAccessingSecurityScopedResource() } }
+        icerik.kendiKitapOlustur(u.deletingPathExtension().lastPathComponent, pdf: u)
     }
 
     private func ac(_ o: PartOzet) {
@@ -201,7 +232,8 @@ struct KitapKarti: View {
         let biten = partlar.filter { icerik.ilerleme[$0.id]?.durum == "bitti" }.count
         VStack(alignment: .leading, spacing: 12) {
             KitapKapagi(ders: ders, sira: sira)
-            IlerlemeCubugu(biten: biten, toplam: partlar.count)
+            // İlerleme çubuğu yalnız hazır kitaplarda; kendi kitaplarda bitti/ilerleme yok
+            if !ders.id.hasPrefix("k-") { IlerlemeCubugu(biten: biten, toplam: partlar.count) }
         }
     }
 }
@@ -320,9 +352,11 @@ struct KitapEkrani: View {
                 Text(ders.baslik).font(Tema.baslik(34, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
                 if let k = ders.kaynak { Text(k).font(Tema.yazi(14)).foregroundStyle(Tema.soluk) }
             }
-            HStack(spacing: 12) {
-                istatistik("%\(yuzde)", "kitap ilerlemesi")
-                istatistik("\(biten) / \(toplam)", "part bitti")
+            if !kendi {
+                HStack(spacing: 12) {
+                    istatistik("%\(yuzde)", "kitap ilerlemesi")
+                    istatistik("\(biten) / \(toplam)", "part bitti")
+                }
             }
         }
     }

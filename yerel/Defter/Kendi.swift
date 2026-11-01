@@ -63,6 +63,22 @@ extension IcerikYonetici {
     func kitapEkle(_ ad: String) {
         kendi.append(Ders(id: KendiDepo.yeniId(), baslik: ad, kaynak: nil, bolumler: [])); kendiKaydet()
     }
+    /// Yeni kendi kitap: arkada tek bölüm + tek part, ekranda yalnız kitap ve sayfaları (alt alta). desen: boş defterin sayfa deseni; pdf verilirse PDF kitabı.
+    func kendiKitapOlustur(_ ad: String, desen: String = "cizgili", pdf: URL? = nil) {
+        let id = KendiDepo.yeniId()
+        kendi.append(Ders(id: id, baslik: ad, kaynak: nil, bolumler: [Bolum(no: 1, baslik: ad, partlar: [])]))
+        kendiKaydet()
+        partEkle(id, 1, ad: ad, desen: desen, pdf: pdf)
+        // PDF kopyalanamadıysa boş kitap kalmasın
+        if kendi.first(where: { $0.id == id })?.bolumler.first?.partlar.isEmpty == true {
+            kendi.removeAll { $0.id == id }; kendiKaydet()
+        }
+    }
+    /// Kendi kitap tek bölüm + tek part'tan oluşuyorsa o part (doğrudan açılır); aksi halde nil
+    func tekPart(_ d: Ders) -> PartOzet? {
+        guard d.id.hasPrefix("k-"), d.bolumler.count == 1, d.bolumler[0].partlar.count == 1 else { return nil }
+        return d.bolumler[0].partlar[0]
+    }
     func kitapAdi(_ id: String, _ ad: String) { degistir(id) { $0.baslik = ad } }
     func kitapSil(_ id: String) {
         kendi.first { $0.id == id }?.bolumler.flatMap { $0.partlar }.forEach { partTemizle($0.id) }
@@ -117,6 +133,7 @@ extension IcerikYonetici {
     }
     private func partTemizle(_ id: String) {
         KendiDepo.temizle(id)
+        Konum.temizle(id)
         if ilerleme[id] != nil { ilerleme[id] = nil; if !Ayar.ornek { Depo.yaz(ilerleme, Depo.kok.appendingPathComponent("ilerleme.json")) } }
     }
 }

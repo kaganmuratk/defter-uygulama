@@ -358,6 +358,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // MARK: Kalınan yer ve bitti işareti (yalnız elle)
     private var sonSayfadami = false
+    private var kendiPart: Bool { part.id.hasPrefix("k-") }
     private let bitirDugmesi = UIButton(type: .system)
     private var durum: String? { IcerikYonetici.ortak.ilerleme[part.id]?.durum }
 
@@ -411,7 +412,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let bitti = durum == "bitti"
         c.attributedTitle = AttributedString(bitti ? "Bitti · işareti kaldır" : "Bitti olarak işaretle", attributes: AttributeContainer([.font: Tema.uiArayuz(15, 700)]))
         bitirDugmesi.configuration = c
-        let goster = sonSayfadami
+        let goster = sonSayfadami && !kendiPart
         if goster { bitirDugmesi.isHidden = false }
         UIView.animate(withDuration: 0.25, animations: { self.bitirDugmesi.alpha = goster ? 1 : 0 }) { _ in if !goster { self.bitirDugmesi.isHidden = true } }
     }
@@ -635,7 +636,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kirli = false
 
         let sol = UIStackView(arrangedSubviews: [geri, panelDugme]); sol.spacing = 6; sol.alignment = .center
-        let sag = UIStackView(arrangedSubviews: [kaldimDugmesi, sayfaMenu, not, kalem, kaydetDugmesi]); sag.spacing = 6; sag.alignment = .center
+        // Kendi kitaplarda "Burada kaldım" ve "bitti" yok (yalnız hazır kitaplarda)
+        let sagDugmeler: [UIView] = kendiPart ? [sayfaMenu, not, kalem, kaydetDugmesi] : [kaldimDugmesi, sayfaMenu, not, kalem, kaydetDugmesi]
+        let sag = UIStackView(arrangedSubviews: sagDugmeler); sag.spacing = 6; sag.alignment = .center
         let pilSol = camPil(sol), pilSag = camPil(sag)
         pilKapsayicilar = [pilSol, pilSag]
         for v in [pilSol, pilSag] { v.translatesAutoresizingMaskIntoConstraints = false; ustCubuk.addSubview(v) }
