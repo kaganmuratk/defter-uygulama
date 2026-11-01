@@ -156,3 +156,54 @@ final class OcrSinavi: XCTestCase {
         XCTAssertFalse(sonuc.label.contains("çalışıyor"))
     }
 }
+
+// Kalem çubuğu, çizim, çizgiye dokunarak seçme, silme ve yazı kutusu (örnek modda parmak çizebilir)
+final class KalemSinavi: XCTestCase {
+    var app: XCUIApplication!
+    override func setUp() {
+        continueAfterFailure = true
+        app = XCUIApplication()
+        app.launchArguments = ["-ornek", "-tema", "acik"]
+    }
+    private func cek(_ ad: String) {
+        let e = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); e.name = ad; e.lifetime = .keepAlways; add(e)
+    }
+    func testCizimSecimYazi() throws {
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(app.buttons["yeniKitap"].waitForExistence(timeout: 15))
+        app.buttons["yeniKitap"].tap()
+        app.buttons["Düz defter"].tap()
+        let alan = app.alerts.textFields.firstMatch
+        XCTAssertTrue(alan.waitForExistence(timeout: 5))
+        alan.typeText("Deneme")
+        app.alerts.buttons["Tamam"].tap()
+        let kitap = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'kitap-k-'")).firstMatch
+        XCTAssertTrue(kitap.waitForExistence(timeout: 5))
+        kitap.tap()
+        XCTAssertTrue(app.buttons["geri"].waitForExistence(timeout: 10))
+        sleep(3)
+        let tuval = app.descendants(matching: .any)["tuval-b0"].firstMatch
+        XCTAssertTrue(tuval.waitForExistence(timeout: 10), "kalem tuvali bulunamadı")
+        app.buttons["arac-kalem"].tap()
+        tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.2)).press(forDuration: 0.1, thenDragTo: tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.26)))
+        sleep(1); cek("t1-cizim")
+        app.buttons["arac-kalem"].tap(); sleep(1); cek("t2-renk-paneli")
+        if app.buttons["renk-2"].exists { app.buttons["renk-2"].tap() }
+        app.buttons["arac-sec"].tap()
+        tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.23)).tap()
+        let kutu = app.descendants(matching: .any)["secim-kutusu"].firstMatch
+        XCTAssertTrue(kutu.waitForExistence(timeout: 5), "seçim kutusu çıkmadı")
+        cek("t3-secim")
+        if app.buttons["secim-sil"].exists { app.buttons["secim-sil"].tap() }
+        sleep(1)
+        XCTAssertFalse(app.descendants(matching: .any)["secim-kutusu"].firstMatch.exists, "silince kutu kalktı mı")
+        cek("t4-silindi")
+        app.buttons["arac-metin"].tap()
+        tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).tap()
+        let metin = app.textViews["yazi-metni"].firstMatch
+        XCTAssertTrue(metin.waitForExistence(timeout: 5), "yazı kutusu çıkmadı")
+        metin.typeText("Merhaba dünya")
+        sleep(1); cek("t5-yazi-kutusu")
+    }
+}

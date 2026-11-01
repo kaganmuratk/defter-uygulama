@@ -51,6 +51,7 @@ final class SecimKutusu: UIView {
 final class SecimKontrol: NSObject {
     private weak var katman: SayfaKatmani?
     private let lasso = UIPanGestureRecognizer()
+    private let dokun = UITapGestureRecognizer()
     private let lassoCizgi = CAShapeLayer()
     private var noktalar: [CGPoint] = []
     private var secili: [Int] = []
@@ -67,7 +68,7 @@ final class SecimKontrol: NSObject {
     var etkin = false {
         didSet {
             guard oldValue != etkin else { return }
-            lasso.isEnabled = etkin
+            lasso.isEnabled = etkin; dokun.isEnabled = etkin
             if !etkin { birak() }
         }
     }
@@ -78,10 +79,15 @@ final class SecimKontrol: NSObject {
         self.katman = katman
         super.init()
         lasso.addTarget(self, action: #selector(lassoJesti(_:)))
-        lasso.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        lasso.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)] + (Ayar.ornek ? [NSNumber(value: UITouch.TouchType.direct.rawValue)] : [])
         lasso.maximumNumberOfTouches = 1
         lasso.isEnabled = false
+        lasso.delegate = self
         katman.addGestureRecognizer(lasso)
+        dokun.addTarget(self, action: #selector(dokunJesti(_:)))
+        dokun.isEnabled = false
+        dokun.delegate = self
+        katman.addGestureRecognizer(dokun)
         lassoCizgi.strokeColor = Tema.vurguUI.cgColor; lassoCizgi.fillColor = Tema.vurguUI.withAlphaComponent(0.07).cgColor
         lassoCizgi.lineWidth = 2; lassoCizgi.lineDashPattern = [6, 4]
         let tasi = UIPanGestureRecognizer(target: self, action: #selector(tasiJesti(_:)))
@@ -117,6 +123,22 @@ final class SecimKontrol: NSObject {
         default:
             lassoCizgi.removeFromSuperlayer()
         }
+    }
+    // Çizgiye dokunarak seçme: dokunulan noktaya en yakın çizgi (20 pt içinde)
+    @objc private func dokunJesti(_ g: UITapGestureRecognizer) {
+        guard let k = katman, g.state == .ended else { return }
+        let p = g.location(in: k)
+        birak()
+        var enYakin: (Int, CGFloat)?
+        for (i, s) in k.tuval.drawing.strokes.enumerated() {
+            guard s.renderBounds.insetBy(dx: -24, dy: -24).contains(p) else { continue }
+            for nk in s.path.interpolatedPoints(by: .distance(5)) {
+                let q = nk.location.applying(s.transform)
+                let d = hypot(q.x - p.x, q.y - p.y)
+                if d < 20, d < (enYakin?.1 ?? .greatestFiniteMagnitude) { enYakin = (i, d) }
+            }
+        }
+        if let e = enYakin { secili = [e.0]; kutuGoster() }
     }
     private func yol(_ n: [CGPoint]) -> UIBezierPath {
         let y = UIBezierPath()
@@ -374,5 +396,14 @@ final class SecimKontrol: NSObject {
         }
         secili = yeniler
         kutuGoster()
+    }
+}
+
+// Seçim kutusu ve işlem çubuğu üzerindeki dokunuşlar daire çizme/dokunma jestlerine gitmesin
+extension SecimKontrol: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var v: UIView? = touch.view
+        while let x = v { if x === kutu || x === cubuk { return false }; v = x.superview }
+        return true
     }
 }
