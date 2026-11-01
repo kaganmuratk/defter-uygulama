@@ -50,7 +50,20 @@ struct PartKaydi: Codable, Equatable {
     var cizimler: [String: Data] = [:]      // sayfa anahtarı → PKDrawing.dataRepresentation()
     var notlar: [YapiskanNot] = []
     var ekSayfalar: [EkSayfa] = []
+    var yaziKutulari: [YaziKutusu]? = nil   // sayfaya yazılan metin kutuları (eski kayıtlarda yok)
     var zaman: Double = 0                   // son kayıt (ms), senkronda son yazan kazanır
+}
+struct YaziKutusu: Codable, Equatable, Identifiable {
+    var id: String = UUID().uuidString
+    var sayfa: String          // sayfa anahtarı
+    var x: Double              // sol üst köşe (sayfa pt)
+    var y: Double
+    var genislik: Double = 260
+    var metin: String = ""
+    var yazi: String = "jakarta"   // jakarta | literata | georgia | menlo | el
+    var boyut: Double = 22
+    var renk: String = "15171c"
+    var kalin: Bool = false
 }
 struct YapiskanNot: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString

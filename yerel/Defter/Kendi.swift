@@ -194,7 +194,7 @@ struct EkleDugmesi: View {
 
 // Okuyucudaki çizimleri sayfalara işleyip tek PDF yapar (paylaşmak için)
 enum PdfPaylas {
-    static func uret(belge: PDFDocument, cizimler: [String: Data], anahtar: (PDFPage) -> String?, ad: String) -> URL? {
+    static func uret(belge: PDFDocument, cizimler: [String: Data], anahtar: (PDFPage) -> String?, ad: String, yazilar: [YaziKutusu] = []) -> URL? {
         let temiz = ad.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(temiz + ".pdf")
         let r = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: PdfUretici.sayfaGenislik, height: PdfUretici.enAzYukseklik))
@@ -210,6 +210,12 @@ enum PdfPaylas {
                     c.restoreGState()
                     if let k = anahtar(p), let d = cizimler[k], let cizim = try? PKDrawing(data: d) {
                         UITraitCollection(userInterfaceStyle: .light).performAsCurrent { cizim.image(from: b, scale: 2).draw(in: b) }
+                    }
+                    if let k = anahtar(p) {
+                        for y in yazilar where y.sayfa == k {
+                            let yazi = NSAttributedString(string: y.metin, attributes: [.font: YaziTipi.font(y.yazi, CGFloat(y.boyut), kalin: y.kalin), .foregroundColor: UIColor(onaltilik: y.renk)])
+                            yazi.draw(in: CGRect(x: y.x + 6, y: y.y + 16 + 4, width: y.genislik - 12, height: b.height))
+                        }
                     }
                 }
             }

@@ -243,7 +243,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
     private func cozunurluguUygula() {
         let f = UIScreen.main.scale * max(pdfView.scaleFactor, 1)
-        for k in katmanlar.values { k.cozunurluk(f); k.secim.olcek = max(pdfView.scaleFactor, 0.3) }
+        for k in katmanlar.values { k.cozunurluk(f); k.secim.olcek = max(pdfView.scaleFactor, 0.3); k.yaziOlcegi(max(pdfView.scaleFactor, 0.3)) }
     }
 
     func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
@@ -254,9 +254,15 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         k.tuval.drawingPolicy = (Ayar.ornek || kalemCubugu.parmakla) ? .anyInput : .pencilOnly
         k.tuval.tool = kalemCubugu.pkArac
         k.tuval.isRulerActive = kalemCubugu.cetvel
-        k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec
+        k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec && kalemCubugu.arac != .metin
         k.secim.etkin = kalemCubugu.arac == .sec
         k.secim.olcek = max(pdfView.scaleFactor, 0.3)
+        k.secim.metinHazir = { [weak self, weak k] metin, alan in self?.metinOnayla(k, metin, alan) }
+        k.yaziModu(kalemCubugu.arac == .metin)
+        k.yaziEkle = { [weak self, weak k] p in self?.yaziEkle(k, p) }
+        k.yaziDegisti = { [weak self] m in self?.yaziGuncelle(m) }
+        k.yaziSilindi = { [weak self] id in self?.yaziSil(id) }
+        k.yaziKutulariniGoster((kayit.yaziKutulari ?? []).filter { $0.sayfa == anahtar }, olcek: max(pdfView.scaleFactor, 0.3))
         k.cizimDegisti = { [weak self, weak k] in guard let self, let k else { return }; self.cizimiAl(k); self.kirli = true; self.taslakPlanla() }
         if let d = kayit.cizimler[anahtar], let cizim = try? PKDrawing(data: d) { k.tuval.drawing = cizim }
         k.notAc = { [weak self] id in self?.notuAc(id) }
@@ -320,9 +326,48 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func aracUygula() {
         for k in katmanlar.values {
             k.tuval.tool = kalemCubugu.pkArac
-            k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec
+            k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec && kalemCubugu.arac != .metin
             k.secim.etkin = kalemCubugu.arac == .sec
+            k.yaziModu(kalemCubugu.arac == .metin)
         }
+    }
+
+    // MARK: Yazı kutuları ve metne çevirme
+    private func yaziEkle(_ k: SayfaKatmani?, _ p: CGPoint) {
+        guard let k else { return }
+        var m = YaziKutusu(sayfa: k.anahtar, x: Double(p.x), y: Double(p.y))
+        m.genislik = Double(min(300, max(k.bounds.width - p.x - 20, 120)))
+        var liste = kayit.yaziKutulari ?? []; liste.append(m); kayit.yaziKutulari = liste
+        kirli = true; taslakPlanla()
+        k.yaziKutulariniGoster(liste.filter { $0.sayfa == k.anahtar }, olcek: max(pdfView.scaleFactor, 0.3))
+        k.yaziOdakla(m.id)
+    }
+    private func yaziGuncelle(_ m: YaziKutusu) {
+        guard var liste = kayit.yaziKutulari, let i = liste.firstIndex(where: { $0.id == m.id }) else { return }
+        if liste[i] != m { liste[i] = m; kayit.yaziKutulari = liste; kirli = true; taslakPlanla() }
+    }
+    private func yaziSil(_ id: String) {
+        kayit.yaziKutulari?.removeAll { $0.id == id }
+        kirli = true; taslakPlanla()
+    }
+    /// Seçilen el yazısı tanındı: düzeltilebilir metin gösterilir, onaylanırsa yazı kutusuna dönüşür ve el yazısı silinir
+    private func metinOnayla(_ k: SayfaKatmani?, _ metin: String, _ r: CGRect) {
+        guard let k else { return }
+        guard !metin.isEmpty else { bilgiGoster("Metin tanınamadı"); return }
+        let a = UIAlertController(title: "Metne çevrildi", message: "Gerekirse düzelt. Eklenince seçili el yazısı silinir.", preferredStyle: .alert)
+        a.addTextField { $0.text = metin; $0.accessibilityIdentifier = "metin-duzelt" }
+        a.addAction(UIAlertAction(title: "Ekle", style: .default) { [weak self, weak k, weak a] _ in
+            guard let self, let k else { return }
+            var m = YaziKutusu(sayfa: k.anahtar, x: Double(r.minX), y: Double(max(r.minY - 16, 0)))
+            m.genislik = Double(min(max(r.width + 60, 180), max(k.bounds.width - r.minX - 10, 120)))
+            m.metin = a?.textFields?.first?.text ?? metin
+            var liste = self.kayit.yaziKutulari ?? []; liste.append(m); self.kayit.yaziKutulari = liste
+            k.secim.secimiSil()
+            k.yaziKutulariniGoster(liste.filter { $0.sayfa == k.anahtar }, olcek: max(self.pdfView.scaleFactor, 0.3))
+            self.kirli = true; self.taslakPlanla()
+        })
+        a.addAction(UIAlertAction(title: "Vazgeç", style: .cancel))
+        present(a, animated: true)
     }
     private func kopyayiYapistir() {
         guard let p = pdfView.currentPage, let a = anahtarlar[ObjectIdentifier(p)], let k = katmanlar[a] else { return }
@@ -521,6 +566,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kayit.ekSayfalar.removeAll { $0.id == id }
         kayit.cizimler[anahtar] = nil
         kayit.notlar.removeAll { $0.sayfa == anahtar }
+        kayit.yaziKutulari?.removeAll { $0.sayfa == anahtar }
         doc.removePage(at: doc.index(for: p))
         kirli = true; taslakPlanla(); paneliGuncelle()
     }
@@ -530,7 +576,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func paylas(_ kaynak: UIView) {
         guard let doc = pdfView.document else { return }
         for k in katmanlar.values { cizimiAl(k) }
-        guard let url = PdfPaylas.uret(belge: doc, cizimler: kayit.cizimler, anahtar: { [weak self] p in self?.anahtarlar[ObjectIdentifier(p)] }, ad: part.baslik) else {
+        guard let url = PdfPaylas.uret(belge: doc, cizimler: kayit.cizimler, anahtar: { [weak self] p in self?.anahtarlar[ObjectIdentifier(p)] }, ad: part.baslik, yazilar: kayit.yaziKutulari ?? []) else {
             bilgiGoster("PDF hazırlanamadı"); return
         }
         let a = UIActivityViewController(activityItems: [url], applicationActivities: nil)
@@ -731,6 +777,11 @@ final class SayfaKatmani: UIView {
     var secimSuruyor = false                 // seçim aracı çizimi değiştirirken kayıt olayı bastırılır
     var cizimDegisti: (() -> Void)?          // seçim aracı işini bitirince okuyucuya haber
     lazy var secim = SecimKontrol(katman: self)
+    var yaziDegisti: ((YaziKutusu) -> Void)?
+    var yaziSilindi: ((String) -> Void)?
+    var yaziEkle: ((CGPoint) -> Void)?
+    private var yaziGorunumleri: [String: YaziKutusuGorunumu] = [:]
+    private let yaziDokunma = UITapGestureRecognizer()
     var notAc: ((String) -> Void)?
     var notTasindi: ((String, CGPoint) -> Void)?
     var notSil: ((String) -> Void)?
@@ -746,6 +797,10 @@ final class SayfaKatmani: UIView {
         tuval.translatesAutoresizingMaskIntoConstraints = false
         tuval.accessibilityIdentifier = "tuval-" + anahtar
         addSubview(tuval)
+        yaziDokunma.addTarget(self, action: #selector(yaziDokunuldu(_:)))
+        yaziDokunma.delegate = self
+        yaziDokunma.isEnabled = false
+        addGestureRecognizer(yaziDokunma)
         NSLayoutConstraint.activate([
             tuval.topAnchor.constraint(equalTo: topAnchor), tuval.bottomAnchor.constraint(equalTo: bottomAnchor),
             tuval.leadingAnchor.constraint(equalTo: leadingAnchor), tuval.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -766,6 +821,28 @@ final class SayfaKatmani: UIView {
         uygula(tuval)
         tuval.setNeedsDisplay()
     }
+
+    // MARK: Yazı kutuları
+    func yaziModu(_ acik: Bool) { yaziDokunma.isEnabled = acik }
+    @objc private func yaziDokunuldu(_ g: UITapGestureRecognizer) {
+        // Açık bir kutu varsa önce klavyeyi kapat; yoksa dokunulan yere yeni kutu
+        if endEditing(true) { return }
+        yaziEkle?(g.location(in: self))
+    }
+    func yaziKutulariniGoster(_ liste: [YaziKutusu], olcek: CGFloat = 1) {
+        for v in yaziGorunumleri.values { v.removeFromSuperview() }
+        yaziGorunumleri = [:]
+        for m in liste {
+            let v = YaziKutusuGorunumu(model: m)
+            v.olcek = olcek
+            v.degisti = { [weak self] yeni in self?.yaziDegisti?(yeni) }
+            v.silindi = { [weak self] id in self?.yaziGorunumleri[id] = nil; self?.yaziSilindi?(id) }
+            addSubview(v)
+            yaziGorunumleri[m.id] = v
+        }
+    }
+    func yaziOdakla(_ id: String) { yaziGorunumleri[id]?.duzenle() }
+    func yaziOlcegi(_ o: CGFloat) { for v in yaziGorunumleri.values { v.olcek = o } }
 
     /// "Burada kaldım" ayracı: sayfanın sağ üst köşesinde küçük renkli şerit (yalnız işaretli sayfada)
     private var ayracGorunumu: UIImageView?
@@ -799,6 +876,15 @@ final class SayfaKatmani: UIView {
             addSubview(r)
             rozetler[n.id] = r
         }
+    }
+}
+
+// Yazı kutusu moduyla not rozetleri ve kutular dokunma jestini almasın (boş yere dokununca yeni kutu)
+extension SayfaKatmani: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var v: UIView? = touch.view
+        while let x = v { if x is YaziKutusuGorunumu || x is NotRozeti { return false }; v = x.superview }
+        return true
     }
 }
 

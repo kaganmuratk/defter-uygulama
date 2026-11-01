@@ -72,6 +72,7 @@ final class SecimKontrol: NSObject {
         }
     }
     var kutusuVarMi: Bool { !secili.isEmpty }
+    var metinHazir: ((String, CGRect) -> Void)?   // (tanınan metin, seçimin sayfadaki alanı)
 
     init(katman: SayfaKatmani) {
         self.katman = katman
@@ -292,6 +293,7 @@ final class SecimKontrol: NSObject {
                   dugme("plus.circle", "Kalınlaştır", kimlik: "secim-kalin") { [weak self] in self?.kalinlikDegistir(1.25) },
                   dugme("plus.square.on.square", "Çoğalt", kimlik: "secim-cogalt") { [weak self] in self?.cogalt() },
                   dugme("doc.on.doc", "Kopyala", kimlik: "secim-kopyala") { [weak self] in self?.kopyala() },
+                  dugme("textformat.abc", "Metne çevir", kimlik: "secim-metne") { [weak self] in self?.metneCevir() },
                   dugme("scissors", "Kes", kimlik: "secim-kes") { [weak self] in self?.kes() },
                   dugme("trash", "Sil", kimlik: "secim-sil", kirmizi: true) { [weak self] in self?.sil() }] as [UIView] {
             cubukSira.addArrangedSubview(v)
@@ -328,6 +330,14 @@ final class SecimKontrol: NSObject {
         SecimPanosu.kopya = secili.filter { $0 < s.count }.map { s[$0] }
     }
     private func kes() { kopyala(); sil() }
+    func secimiSil() { sil() }
+    private func metneCevir() {
+        guard let k = katman, let r = sinirlar() else { return }
+        let s = k.tuval.drawing.strokes
+        let secilen = secili.filter { $0 < s.count }.map { s[$0] }
+        let resim = MetinTanima.resim(secilen, alan: r.insetBy(dx: -16, dy: -16))
+        MetinTanima.tani(resim) { [weak self] metin, _ in self?.metinHazir?(metin ?? "", r) }
+    }
     private func sil() {
         let ids = secili.sorted(by: >)
         degistir { d in for i in ids where i < d.strokes.count { d.strokes.remove(at: i) } }

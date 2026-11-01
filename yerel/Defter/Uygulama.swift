@@ -29,6 +29,7 @@ struct KokEkran: View {
     var body: some View {
         Group {
             if ProcessInfo.processInfo.arguments.contains("-yedekTesti") { YedekSinavEkrani() }
+            else if ProcessInfo.processInfo.arguments.contains("-ocrTesti") { OcrSinavEkrani() }
             else if icerik.anahtarGerekli && !Ayar.ornek { AnahtarEkrani() }
             else { KutuphaneEkrani() }
         }

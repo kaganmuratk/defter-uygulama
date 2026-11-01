@@ -11,7 +11,7 @@ enum KalemPaleti {
 }
 
 final class KalemCubugu: UIView {
-    enum Arac: String { case kalem, fosforlu, silgi, sec }
+    enum Arac: String { case kalem, fosforlu, silgi, sec, metin }
 
     var aracDegisti: (() -> Void)?
     var geriAl: (() -> Void)?
@@ -48,7 +48,7 @@ final class KalemCubugu: UIView {
     /// Canvas'ın kullanacağı PencilKit aracı
     var pkArac: PKTool {
         switch arac {
-        case .kalem, .sec: return PKInkingTool(.pen, color: renk(.kalem), width: kalinlik[.kalem] ?? 3)
+        case .kalem, .sec, .metin: return PKInkingTool(.pen, color: renk(.kalem), width: kalinlik[.kalem] ?? 3)
         case .fosforlu: return PKInkingTool(.marker, color: renk(.fosforlu), width: kalinlik[.fosforlu] ?? 18)
         case .silgi: return silgiVektor ? PKEraserTool(.vector) : PKEraserTool(.bitmap)
         }
@@ -75,7 +75,7 @@ final class KalemCubugu: UIView {
         let ileri = simge("arrow.uturn.forward", "Yinele") { [weak self] in self?.yinele?() }
         geri.accessibilityIdentifier = "kalemGeri"; ileri.accessibilityIdentifier = "kalemYinele"
         let ayrac1 = ayirici(), ayrac2 = ayirici()
-        let bilgi: [(Arac, String, String)] = [(.kalem, "pencil.tip", "Kalem"), (.fosforlu, "highlighter", "Fosforlu"), (.silgi, "eraser", "Silgi"), (.sec, "lasso", "Seç")]
+        let bilgi: [(Arac, String, String)] = [(.kalem, "pencil.tip", "Kalem"), (.fosforlu, "highlighter", "Fosforlu"), (.silgi, "eraser", "Silgi"), (.sec, "lasso", "Seç"), (.metin, "textformat", "Yazı kutusu")]
         var araclar: [UIView] = []
         for (a, s, ad) in bilgi {
             let b = simge(s, ad) { [weak self] in self?.dokunuldu(a) }

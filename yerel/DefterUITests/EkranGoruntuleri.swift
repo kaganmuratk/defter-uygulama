@@ -141,3 +141,18 @@ final class YedekSinavi: XCTestCase {
         XCTAssertEqual(sonuc.label, "YEDEK-TEST: TAMAM")
     }
 }
+
+// Vision ile metin tanıma sınavı: desteklenen diller ve el yazısı benzeri yazı tipiyle tanıma sonucu ekran görüntüsünde görünür
+final class OcrSinavi: XCTestCase {
+    func testOcr() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ocrTesti"]
+        app.launch()
+        let sonuc = app.staticTexts["ocr-sonuc"]
+        XCTAssertTrue(sonuc.waitForExistence(timeout: 20))
+        sleep(6)
+        let ek = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); ek.name = "ocr-sonucu"; ek.lifetime = .keepAlways; add(ek)
+        let ek2 = XCTAttachment(string: sonuc.label); ek2.name = "ocr-metin"; ek2.lifetime = .keepAlways; add(ek2)
+        XCTAssertFalse(sonuc.label.contains("çalışıyor"))
+    }
+}
