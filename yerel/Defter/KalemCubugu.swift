@@ -426,9 +426,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         p.selectedColor = renk(a)
         p.supportsAlpha = false
         p.delegate = self
-        p.modalPresentationStyle = .popover
-        p.popoverPresentationController?.sourceView = renkDaire
-        p.popoverPresentationController?.sourceRect = renkDaire.bounds
+        if sunum == nil { Tani.yaz("renk seçici açılamadı", "sunum yok") }
         sunum?(p)
     }
     func colorPickerViewController(_ viewController: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool) {
