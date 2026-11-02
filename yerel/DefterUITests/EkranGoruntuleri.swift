@@ -262,9 +262,9 @@ final class Tur5Sinavi: XCTestCase {
         // çubuğu sağa taşı
         let tut = app.descendants(matching: .any)["kalemTutamac"]
         if tut.exists {
-            tut.press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+            tut.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
             sleep(2); cek("u7-cubuk-sagda")
-            app.descendants(matching: .any)["kalemTutamac"].press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)))
+            app.descendants(matching: .any)["kalemTutamac"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)))
             sleep(2); cek("u8-cubuk-sol-ust")
         }
         // araçlar
