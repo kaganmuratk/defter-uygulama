@@ -255,7 +255,12 @@ final class Tur5Sinavi: XCTestCase {
         // renk paneli + serbest renk
         app.buttons["arac-kalem"].tap(); sleep(1)
         cek("u4-renk-paneli")
-        if app.buttons["renk-ozel"].exists { app.buttons["renk-ozel"].tap(); sleep(3); cek("u5-renk-secici") ; app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap(); sleep(1) }
+        if app.buttons["renk-ozel"].exists {
+            app.buttons["renk-ozel"].tap(); sleep(2); cek("u5-renk-secici")
+            let alan = app.descendants(matching: .any)["renk-alani"]
+            if alan.exists { alan.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.25)).tap(); sleep(1); cek("u5b-renk-secildi") }
+            if app.buttons["renk-tamam"].exists { app.buttons["renk-tamam"].tap(); sleep(1); cek("u5c-renk-tamam") }
+        }
         // sayfaya dokununca panel kapanmalı
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap(); sleep(1)
         cek("u6-panel-kapandi")

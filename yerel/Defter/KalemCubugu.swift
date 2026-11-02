@@ -22,7 +22,7 @@ extension UIColor {
     }
 }
 
-final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
+final class KalemCubugu: UIView {
     enum Arac: String { case kalem, fosforlu, silgi, sec, metin, gezin, resim }
     enum Konum: String {
         case alt, ust, sol, sag, solAlt, sagAlt, solUst, sagUst
@@ -36,7 +36,6 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
     var parmakDegisti: ((Bool) -> Void)?
     var yapistir: (() -> Void)?
     var yapistirilabilir: (() -> Bool)?
-    var sunum: ((UIViewController) -> Void)?     // renk seçici gibi ekranlar okuyucu üzerinden açılır
 
     private(set) var arac: Arac = .kalem
     private(set) var cetvel = false
@@ -49,6 +48,11 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
     private var ozel: [Arac: String] = [:]             // renk seçiciden seçilen özel renk (hex)
     private var ozelKullan: [Arac: Bool] = [:]         // true ise paletteki renk yerine özel renk geçerli
     private var seciciArac: Arac?
+    private let ozelPanel = UIStackView()
+    private let renkAlani = RenkAlani()
+    private let parlaklikCubugu = UISlider()
+    private let onizleme = UIView()
+    private let hexEtiketi = UILabel()
     private var kalinlik: [Arac: CGFloat] = [.kalem: 3, .fosforlu: 18]
     private let kalinlikAraligi: [Arac: ClosedRange<Float>] = [.kalem: 1...14, .fosforlu: 8...44]
 
@@ -173,7 +177,34 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
             self.kalinlikCubugu.isEnabled = !self.silgiVektor
             self.aracDegisti?(); self.ayarGizlemeyiPlanla()
         }, for: .valueChanged)
-        ayarSira.addArrangedSubview(renkSatiri); ayarSira.addArrangedSubview(silgiModu); ayarSira.addArrangedSubview(kalinlikCubugu)
+        // Özel renk paneli: renk alanı (sol-sağ ton, yukarı-aşağı doygunluk), parlaklık sürgüsü, önizleme + hex + Tamam
+        renkAlani.translatesAutoresizingMaskIntoConstraints = false
+        renkAlani.accessibilityIdentifier = "renk-alani"; renkAlani.isAccessibilityElement = true; renkAlani.accessibilityLabel = "Renk alanı"
+        renkAlani.degisti = { [weak self] in self?.ozelGuncelle(uygula: true) }
+        parlaklikCubugu.minimumValue = 0.05; parlaklikCubugu.maximumValue = 1
+        parlaklikCubugu.accessibilityIdentifier = "renk-parlaklik"
+        parlaklikCubugu.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.renkAlani.bri = CGFloat(self.parlaklikCubugu.value)
+            self.ozelGuncelle(uygula: true)
+        }, for: .valueChanged)
+        onizleme.translatesAutoresizingMaskIntoConstraints = false
+        onizleme.layer.cornerRadius = 15; onizleme.layer.borderWidth = 1
+        onizleme.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        onizleme.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        hexEtiketi.font = Tema.uiArayuz(14, 600); hexEtiketi.textColor = Tema.murekkepUI
+        var tamamAyar = UIButton.Configuration.filled()
+        tamamAyar.cornerStyle = .capsule; tamamAyar.title = "Tamam"
+        tamamAyar.baseBackgroundColor = Tema.dolguUI; tamamAyar.baseForegroundColor = Tema.dolguUstuUI
+        tamamAyar.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+        let tamam = UIButton(configuration: tamamAyar, primaryAction: UIAction { [weak self] _ in self?.ozelPaneliKapat() })
+        tamam.accessibilityIdentifier = "renk-tamam"
+        let altSatir = UIStackView(arrangedSubviews: [onizleme, hexEtiketi, UIView(), tamam])
+        altSatir.axis = .horizontal; altSatir.spacing = 10; altSatir.alignment = .center
+        ozelPanel.axis = .vertical; ozelPanel.spacing = 12; ozelPanel.alignment = .fill
+        for v in [renkAlani, parlaklikCubugu, altSatir] { ozelPanel.addArrangedSubview(v) }
+        ozelPanel.isHidden = true
+        ayarSira.addArrangedSubview(renkSatiri); ayarSira.addArrangedSubview(silgiModu); ayarSira.addArrangedSubview(kalinlikCubugu); ayarSira.addArrangedSubview(ozelPanel)
         ayarSira.axis = .vertical; ayarSira.spacing = 12; ayarSira.alignment = .fill
         ayarSira.translatesAutoresizingMaskIntoConstraints = false
         ayarPaneli.contentView.addSubview(ayarSira)
@@ -345,6 +376,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
 
     /// Silgi paneli: parça silme / çizgiyi tamamen silme + boyut
     private func silgiPaneliniAc() {
+        ozelPanel.isHidden = true; kalinlikCubugu.isHidden = false
         renkSatiri.isHidden = true; silgiModu.isHidden = false
         silgiModu.selectedSegmentIndex = silgiVektor ? 1 : 0
         kalinlikCubugu.minimumValue = 6; kalinlikCubugu.maximumValue = 60
@@ -358,6 +390,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         if arac == .silgi { silgiPaneliniAc(); return }
         let a: Arac = arac == .fosforlu ? .fosforlu : .kalem
         if arac == .sec { sec(a) }
+        ozelPanel.isHidden = true; kalinlikCubugu.isHidden = false
         renkSatiri.isHidden = false; silgiModu.isHidden = true; kalinlikCubugu.isEnabled = true
         renkSatiri.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let ozelAcik = ozelKullan[a] == true
@@ -392,7 +425,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
             o.layer.borderWidth = 1; o.layer.borderColor = Tema.camKenarUI.resolvedColor(with: traitCollection).cgColor
         }
         o.accessibilityLabel = "Özel renk seç"; o.accessibilityIdentifier = "renk-ozel"
-        o.addAction(UIAction { [weak self] _ in self?.renkSeciciAc(a) }, for: .touchUpInside)
+        o.addAction(UIAction { [weak self] _ in self?.ozelPaneliAc(a) }, for: .touchUpInside)
         renkSatiri.addArrangedSubview(o)
 
         let aralik = kalinlikAraligi[a] ?? 1...14
@@ -418,24 +451,28 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         guncelle(); ayarPaneliniAc(); aracDegisti?()
     }
 
-    // MARK: Özel renk (iOS renk seçici: karışım alanı, sürgüler, hex)
-    private func renkSeciciAc(_ a: Arac) {
-        ayarGizleme?.cancel()
+    // MARK: Özel renk (panelin içinde: renk alanı + parlaklık + hex)
+    private func ozelPaneliAc(_ a: Arac) {
         seciciArac = a
-        let p = UIColorPickerViewController()
-        p.selectedColor = renk(a)
-        p.supportsAlpha = false
-        p.delegate = self
-        if sunum == nil { Tani.yaz("renk seçici açılamadı", "sunum yok") }
-        sunum?(p)
+        var h: CGFloat = 0, sa: CGFloat = 0, b: CGFloat = 0, al: CGFloat = 0
+        renk(a).getHue(&h, saturation: &sa, brightness: &b, alpha: &al)
+        renkAlani.baslat(ton: h, doygunluk: sa, parlaklik: max(b, 0.05))
+        parlaklikCubugu.value = Float(max(b, 0.05))
+        ozelGuncelle(uygula: false)
+        renkSatiri.isHidden = true; kalinlikCubugu.isHidden = true; silgiModu.isHidden = true; ozelPanel.isHidden = false
+        ayarGizleme?.cancel()        // renk seçilirken panel kendiliğinden kapanmaz
+        setNeedsLayout(); layoutIfNeeded()
     }
-    func colorPickerViewController(_ viewController: UIColorPickerViewController, didSelect color: UIColor, continuously: Bool) {
-        guard !continuously, let a = seciciArac else { return }
-        ozelAyarla(a, color)
+    private func ozelPaneliKapat() {
+        ozelPanel.isHidden = true
+        ayarPaneliniAc()
     }
-    func colorPickerViewControllerDidFinish(_ viewController: UIColorPickerViewController) {
-        if let a = seciciArac { ozelAyarla(a, viewController.selectedColor) }
-        ayarGizlemeyiPlanla()
+    private func ozelGuncelle(uygula: Bool) {
+        let r = renkAlani.renk
+        onizleme.backgroundColor = r
+        onizleme.layer.borderColor = Tema.camKenarUI.resolvedColor(with: traitCollection).cgColor
+        hexEtiketi.text = "#" + r.onaltilikDeger.uppercased()
+        if uygula, let a = seciciArac { ozelAyarla(a, r) }
     }
     private func ozelAyarla(_ a: Arac, _ renk: UIColor) {
         let hex = renk.onaltilikDeger
@@ -443,7 +480,6 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         UserDefaults.standard.set(hex, forKey: "ozelRenk-" + a.rawValue)
         UserDefaults.standard.set(true, forKey: "ozelKullan-" + a.rawValue)
         guncelle(); aracDegisti?()
-        if !ayarPaneli.isHidden { ayarPaneliniAc() }
     }
 
     private func kalinlikDegisti() {
@@ -476,5 +512,55 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
             o.append(UIAction(title: "Yapıştır", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in self?.yapistir?() })
         }
         return o
+    }
+}
+
+/// Özel renk alanı: yatay eksen ton, dikey eksen doygunluk (üstte canlı, altta soluk); parlaklık ayrı sürgüyle
+final class RenkAlani: UIView {
+    private(set) var ton: CGFloat = 0, doygunluk: CGFloat = 1
+    var bri: CGFloat = 1 { didSet { setNeedsDisplay() } }
+    var degisti: (() -> Void)?
+    var renk: UIColor { UIColor(hue: ton, saturation: doygunluk, brightness: bri, alpha: 1) }
+    override var intrinsicContentSize: CGSize { CGSize(width: 300, height: 130) }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.cornerRadius = 12; layer.cornerCurve = .continuous; clipsToBounds = true
+        isOpaque = true
+        let surukle = UIPanGestureRecognizer(target: self, action: #selector(dokun(_:)))
+        surukle.maximumNumberOfTouches = 1
+        addGestureRecognizer(surukle)
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(dokun(_:))))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func baslat(ton: CGFloat, doygunluk: CGFloat, parlaklik: CGFloat) {
+        self.ton = ton; self.doygunluk = doygunluk; bri = parlaklik
+        setNeedsDisplay()
+    }
+    @objc private func dokun(_ g: UIGestureRecognizer) {
+        let p = g.location(in: self)
+        ton = min(max(p.x / max(bounds.width, 1), 0), 1)
+        doygunluk = 1 - min(max(p.y / max(bounds.height, 1), 0), 1)
+        setNeedsDisplay()
+        degisti?()
+    }
+    override func draw(_ rect: CGRect) {
+        guard let c = UIGraphicsGetCurrentContext(), bounds.width > 1 else { return }
+        let uzay = CGColorSpaceCreateDeviceRGB()
+        let serit = 3
+        let n = Int((bounds.width / CGFloat(serit)).rounded(.up))
+        for i in 0..<n {
+            let h = CGFloat(i) / CGFloat(max(n - 1, 1))
+            let renkler = [UIColor(hue: h, saturation: 1, brightness: bri, alpha: 1).cgColor, UIColor(hue: h, saturation: 0, brightness: bri, alpha: 1).cgColor] as CFArray
+            guard let g = CGGradient(colorsSpace: uzay, colors: renkler, locations: [0, 1]) else { continue }
+            c.saveGState()
+            c.clip(to: CGRect(x: CGFloat(i * serit), y: 0, width: CGFloat(serit), height: bounds.height))
+            c.drawLinearGradient(g, start: .zero, end: CGPoint(x: 0, y: bounds.height), options: [])
+            c.restoreGState()
+        }
+        let imlec = CGRect(x: ton * bounds.width - 9, y: (1 - doygunluk) * bounds.height - 9, width: 18, height: 18)
+        c.setLineWidth(3); c.setStrokeColor(UIColor.white.cgColor); c.strokeEllipse(in: imlec)
+        c.setLineWidth(1); c.setStrokeColor(UIColor.black.withAlphaComponent(0.55).cgColor); c.strokeEllipse(in: imlec.insetBy(dx: -1.5, dy: -1.5))
     }
 }

@@ -331,13 +331,6 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             kalemCubugu.leadingAnchor.constraint(equalTo: pdfView.leadingAnchor),
             kalemCubugu.trailingAnchor.constraint(equalTo: pdfView.trailingAnchor),
         ])
-        kalemCubugu.sunum = { [weak self] vc in
-            guard let self else { return }
-            // Sayfa/alert gibi açık bir ekran varsa onun üstünden aç; yoksa okuyucudan
-            var ust: UIViewController = self
-            while let s = ust.presentedViewController { ust = s }
-            ust.present(vc, animated: true) { if vc.presentingViewController == nil { Tani.yaz("renk seçici gösterilmedi") } }
-        }
         kalemCubugu.aracDegisti = { [weak self] in self?.aracUygula() }
         kalemCubugu.geriAl = { [weak self] in self?.kendiGeriAlma.undo() }
         kalemCubugu.yinele = { [weak self] in self?.kendiGeriAlma.redo() }
