@@ -7,6 +7,7 @@ struct Ders: Codable, Identifiable, Hashable {
     var baslik: String
     var kaynak: String?
     var bolumler: [Bolum]
+    var klasor: Bool?       // kendi klasörü: içinde defter/PDF öğeleri (bölüm no 0) ve isteğe bağlı alt klasörler (diğer bölümler)
 }
 struct Bolum: Codable, Identifiable, Hashable {
     var no: Int
@@ -51,6 +52,7 @@ struct PartKaydi: Codable, Equatable {
     var notlar: [YapiskanNot] = []
     var ekSayfalar: [EkSayfa] = []
     var yaziKutulari: [YaziKutusu]? = nil   // sayfaya yazılan metin kutuları (eski kayıtlarda yok)
+    var resimler: [ResimKutusu]? = nil         // sayfalara eklenen görseller (dosyalar kendi/ klasöründe)
     var sayfaAdlari: [String: String]? = nil   // sayfa anahtarı → kullanıcının verdiği ad
     var sira: [String]? = nil                  // kendi part'larda sayfaların tam sırası (sayfa anahtarları)
     var silinen: [String]? = nil               // kendi part'larda silinen içerik sayfaları ("b<i>")
@@ -67,6 +69,15 @@ struct YaziKutusu: Codable, Equatable, Identifiable {
     var boyut: Double = 22
     var renk: String = "15171c"
     var kalin: Bool = false
+}
+struct ResimKutusu: Codable, Equatable, Identifiable {
+    var id: String = UUID().uuidString
+    var sayfa: String          // sayfa anahtarı
+    var x: Double              // sol üst köşe (sayfa pt)
+    var y: Double
+    var genislik: Double
+    var yukseklik: Double
+    var dosya: String          // kendi/ içindeki JPEG adı
 }
 struct YapiskanNot: Codable, Equatable, Identifiable {
     var id: String = UUID().uuidString

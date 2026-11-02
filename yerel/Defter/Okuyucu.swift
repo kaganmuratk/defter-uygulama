@@ -2,6 +2,7 @@ import UIKit
 import PDFKit
 import PencilKit
 import SwiftUI
+import PhotosUI
 
 // Okuyucu: part PDF'i (PDFKit) + her sayfanın üstünde PencilKit tuvali (PDFPageOverlayViewProvider).
 // Yakınlaştırma, kaydırma, avuç reddi, kalem türleri/renk/kalınlık/silgi (PKToolPicker) Apple'dan hazır gelir.
@@ -269,6 +270,10 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         k.secim.olcek = max(pdfView.scaleFactor, 0.3)
         k.secim.metinHazir = { [weak self, weak k] metin, alan in self?.metinOnayla(k, metin, alan) }
         k.yaziModu(kalemCubugu.arac == .metin)
+        k.resimDegisti = { [weak self] m in self?.resimGuncelle(m) }
+        k.resimSilindi = { [weak self] id in self?.resimSil(id) }
+        k.resimleriGoster((kayit.resimler ?? []).filter { $0.sayfa == anahtar })
+        k.resimModu(kalemCubugu.arac == .resim)
         k.yaziEkle = { [weak self, weak k] p in self?.yaziEkle(k, p) }
         k.yaziDegisti = { [weak self] m in self?.yaziGuncelle(m) }
         k.yaziSilindi = { [weak self] id in self?.yaziSil(id) }
@@ -342,6 +347,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.cizimAktif
             k.secim.etkin = kalemCubugu.arac == .sec
             k.yaziModu(kalemCubugu.arac == .metin)
+            k.resimModu(kalemCubugu.arac == .resim)
         }
         // Gezin aracı: Apple Pencil ile de sayfa kaydırılır/sürüklenir (normalde yalnız parmak kaydırır)
         let tipler: [NSNumber] = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
@@ -669,6 +675,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kayit.cizimler[anahtar] = nil
         kayit.notlar.removeAll { $0.sayfa == anahtar }
         kayit.yaziKutulari?.removeAll { $0.sayfa == anahtar }
+        kayit.resimler?.removeAll { $0.sayfa == anahtar }
         kayit.sayfaAdlari?[anahtar] = nil
         katmanlar[anahtar] = nil
         doc.removePage(at: i)
@@ -681,13 +688,56 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func paylas(_ kaynak: UIView) {
         guard let doc = pdfView.document else { return }
         for k in katmanlar.values { cizimiAl(k) }
-        guard let url = PdfPaylas.uret(belge: doc, cizimler: kayit.cizimler, anahtar: { [weak self] p in self?.anahtarlar[ObjectIdentifier(p)] }, ad: part.baslik, yazilar: kayit.yaziKutulari ?? []) else {
+        guard let url = PdfPaylas.uret(belge: doc, cizimler: kayit.cizimler, anahtar: { [weak self] p in self?.anahtarlar[ObjectIdentifier(p)] }, ad: part.baslik, yazilar: kayit.yaziKutulari ?? [], resimler: kayit.resimler ?? []) else {
             bilgiGoster("PDF hazırlanamadı"); return
         }
         let a = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         a.popoverPresentationController?.sourceView = kaynak
         a.popoverPresentationController?.sourceRect = kaynak.bounds
         present(a, animated: true)
+    }
+
+    // MARK: Görseller
+    private func galeriAc() {
+        var c = PHPickerConfiguration()
+        c.filter = .images; c.selectionLimit = 1
+        let p = PHPickerViewController(configuration: c)
+        p.delegate = self
+        present(p, animated: true)
+    }
+    private func kameraAc() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { bilgiGoster("Kamera kullanılamıyor"); return }
+        let p = UIImagePickerController()
+        p.sourceType = .camera
+        p.delegate = self
+        present(p, animated: true)
+    }
+    /// Seçilen/çekilen görseli şu an görünen sayfanın ortasına koyar ve Görsel aracını açar
+    private func resmiYerlestir(_ img: UIImage) {
+        guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)], let k = ResimDepo.kaydet(img) else { bilgiGoster("Görsel eklenemedi"); return }
+        let boy = p.bounds(for: .mediaBox)
+        let merkez = pdfView.convert(CGPoint(x: pdfView.bounds.midX, y: pdfView.bounds.midY), to: p)
+        let oran = k.boyut.height / max(k.boyut.width, 1)
+        var w = min(boy.width * 0.6, 420)
+        if w * oran > boy.height * 0.7 { w = boy.height * 0.7 / oran }
+        let h = w * oran
+        let x = min(max(merkez.x - w / 2, 10), max(boy.width - w - 10, 10))
+        let y = min(max(boy.height - merkez.y - h / 2, 10), max(boy.height - h - 10, 10))
+        let m = ResimKutusu(sayfa: anahtar, x: Double(x), y: Double(y), genislik: Double(w), yukseklik: Double(h), dosya: k.dosya)
+        var liste = kayit.resimler ?? []; liste.append(m); kayit.resimler = liste
+        kirli = true; taslakPlanla()
+        kalemCubugu.sec(.resim)
+        katmanlar[anahtar]?.resimleriGoster(liste.filter { $0.sayfa == anahtar })
+        katmanlar[anahtar]?.resimSec(m.id)
+        bilgiGoster("Görsel eklendi · sürükle, köşesinden boyutlandır")
+    }
+    private func resimGuncelle(_ m: ResimKutusu) {
+        guard var liste = kayit.resimler, let i = liste.firstIndex(where: { $0.id == m.id }) else { return }
+        if liste[i] != m { liste[i] = m; kayit.resimler = liste; kirli = true; taslakPlanla() }
+    }
+    private func resimSil(_ id: String) {
+        kayit.resimler?.removeAll { $0.id == id }
+        kirli = true; taslakPlanla()
     }
 
     // MARK: Yapışkan notlar
@@ -780,6 +830,10 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             UIAction(title: "Kareli sayfa ekle", image: UIImage(systemName: "squareshape.split.3x3")) { [weak self] _ in self?.sayfaEkle(.kareli) },
             UIAction(title: "Noktalı sayfa ekle", image: UIImage(systemName: "circle.grid.3x3")) { [weak self] _ in self?.sayfaEkle(.noktali) },
             UIAction(title: "Düz sayfa ekle", image: UIImage(systemName: "doc")) { [weak self] _ in self?.sayfaEkle(.duz) },
+            UIMenu(title: "Görsel ekle", image: UIImage(systemName: "photo.badge.plus"), children: [
+                UIAction(title: "Galeriden seç", image: UIImage(systemName: "photo.on.rectangle")) { [weak self] _ in self?.galeriAc() },
+                UIAction(title: "Fotoğraf çek", image: UIImage(systemName: "camera")) { [weak self] _ in self?.kameraAc() },
+            ]),
             UIMenu(options: .displayInline, children: [
                 UIAction(title: "PDF olarak paylaş", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in self?.paylas(sayfaMenu) },
                 UIAction(title: "Notları gizle / göster", image: UIImage(systemName: "eye.slash")) { [weak self] _ in self?.notlariDegistir() },
@@ -887,6 +941,11 @@ final class SayfaKatmani: UIView {
     var yaziEkle: ((CGPoint) -> Void)?
     private var yaziGorunumleri: [String: YaziKutusuGorunumu] = [:]
     private let yaziDokunma = UITapGestureRecognizer()
+    var resimDegisti: ((ResimKutusu) -> Void)?
+    var resimSilindi: ((String) -> Void)?
+    private var resimGorunumleri: [String: ResimGorunumu] = [:]
+    private let resimIptal = UITapGestureRecognizer()
+    private var resimModuAcik = false
     var notAc: ((String) -> Void)?
     var notTasindi: ((String, CGPoint) -> Void)?
     var notSil: ((String) -> Void)?
@@ -906,6 +965,10 @@ final class SayfaKatmani: UIView {
         yaziDokunma.delegate = self
         yaziDokunma.isEnabled = false
         addGestureRecognizer(yaziDokunma)
+        resimIptal.addTarget(self, action: #selector(resimSecimiKaldir))
+        resimIptal.delegate = self
+        resimIptal.isEnabled = false
+        addGestureRecognizer(resimIptal)
         NSLayoutConstraint.activate([
             tuval.topAnchor.constraint(equalTo: topAnchor), tuval.bottomAnchor.constraint(equalTo: bottomAnchor),
             tuval.leadingAnchor.constraint(equalTo: leadingAnchor), tuval.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -926,6 +989,32 @@ final class SayfaKatmani: UIView {
         uygula(tuval)
         tuval.setNeedsDisplay()
     }
+
+    // MARK: Görseller (tuvalin ALTINDA durur; üstüne çizilebilir. Yalnız Görsel aracı açıkken dokunulur)
+    func resimleriGoster(_ liste: [ResimKutusu]) {
+        for v in resimGorunumleri.values { v.removeFromSuperview() }
+        resimGorunumleri = [:]
+        for m in liste {
+            let v = ResimGorunumu(model: m, gorsel: ResimDepo.yukle(m.dosya))
+            v.degisti = { [weak self] y in self?.resimDegisti?(y) }
+            v.silindi = { [weak self] id in
+                self?.resimGorunumleri[id]?.removeFromSuperview(); self?.resimGorunumleri[id] = nil
+                self?.resimSilindi?(id)
+            }
+            v.secildi = { [weak self] id in self?.resimSec(id) }
+            v.etkinlestir(resimModuAcik)
+            insertSubview(v, at: 0)
+            resimGorunumleri[m.id] = v
+        }
+    }
+    func resimModu(_ acik: Bool) {
+        resimModuAcik = acik
+        tuval.isUserInteractionEnabled = !acik
+        resimIptal.isEnabled = acik
+        for v in resimGorunumleri.values { v.etkinlestir(acik) }
+    }
+    func resimSec(_ id: String) { for (k, v) in resimGorunumleri { v.secili = k == id } }
+    @objc private func resimSecimiKaldir() { for v in resimGorunumleri.values { v.secili = false } }
 
     // MARK: Yazı kutuları
     func yaziModu(_ acik: Bool) { yaziDokunma.isEnabled = acik }
@@ -988,7 +1077,7 @@ final class SayfaKatmani: UIView {
 extension SayfaKatmani: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var v: UIView? = touch.view
-        while let x = v { if x is YaziKutusuGorunumu || x is NotRozeti { return false }; v = x.superview }
+        while let x = v { if x is YaziKutusuGorunumu || x is NotRozeti || x is ResimGorunumu { return false }; v = x.superview }
         return true
     }
 }
@@ -1081,6 +1170,24 @@ final class BosSayfa: PDFPage {
             while y < r.maxY { var x = r.minX + 24; while x < r.maxX { context.fillEllipse(in: CGRect(x: x - 1.2, y: y - 1.2, width: 2.4, height: 2.4)); x += 24 }; y += 24 }
         }
     }
+}
+
+extension OkuyucuKontrol: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard let ip = results.first?.itemProvider, ip.canLoadObject(ofClass: UIImage.self) else { return }
+        ip.loadObject(ofClass: UIImage.self) { [weak self] nesne, _ in
+            guard let img = nesne as? UIImage else { return }
+            DispatchQueue.main.async { self?.resmiYerlestir(img) }
+        }
+    }
+}
+extension OkuyucuKontrol: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        picker.dismiss(animated: true)
+        if let img = info[.originalImage] as? UIImage { resmiYerlestir(img) }
+    }
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { picker.dismiss(animated: true) }
 }
 
 // SwiftUI köprüsü

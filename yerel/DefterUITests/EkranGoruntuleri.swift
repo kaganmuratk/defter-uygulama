@@ -205,3 +205,94 @@ final class KalemSinavi: XCTestCase {
         XCTAssertTrue(app.buttons["arac-metin"].exists)
     }
 }
+
+// Tur 5: klasör sistemi, serbest renk, çubuğu taşıma, sayfa paneli (ad değiştir), gezin ve görsel araçları
+final class Tur5Sinavi: XCTestCase {
+    var app: XCUIApplication!
+    override func setUp() {
+        continueAfterFailure = true
+        app = XCUIApplication()
+        app.launchArguments = ["-ornek", "-tema", "acik"]
+    }
+    private func cek(_ ad: String) {
+        let e = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); e.name = ad; e.lifetime = .keepAlways; add(e)
+    }
+    func testKlasorVeOkuyucu() throws {
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(app.buttons["yeniKitap"].waitForExistence(timeout: 15))
+        app.buttons["yeniKitap"].tap()
+        let klasor = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Klasör'")).firstMatch
+        XCTAssertTrue(klasor.waitForExistence(timeout: 5))
+        cek("u0-yeni-menu")
+        klasor.tap()
+        let alan = app.alerts.textFields.firstMatch
+        XCTAssertTrue(alan.waitForExistence(timeout: 5))
+        alan.typeText("Elektronik")
+        app.alerts.buttons["Tamam"].tap()
+        let kitap = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'kitap-k-'")).firstMatch
+        XCTAssertTrue(kitap.waitForExistence(timeout: 5))
+        kitap.tap()
+        XCTAssertTrue(app.buttons["klasorEkle"].waitForExistence(timeout: 10))
+        cek("u1-bos-klasor")
+        // alt klasör
+        app.buttons["klasorEkle"].tap()
+        app.buttons["Alt klasör"].tap()
+        let a2 = app.alerts.textFields.firstMatch
+        XCTAssertTrue(a2.waitForExistence(timeout: 5)); a2.typeText("Vize"); app.alerts.buttons["Tamam"].tap()
+        // çizgili defter
+        app.buttons["klasorEkle"].tap()
+        app.buttons["Çizgili defter"].tap()
+        let a3 = app.alerts.textFields.firstMatch
+        XCTAssertTrue(a3.waitForExistence(timeout: 5)); a3.typeText("Ders notları"); app.alerts.buttons["Tamam"].tap()
+        sleep(1); cek("u2-klasor-icerigi")
+        let oge = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'k-'")).firstMatch
+        XCTAssertTrue(oge.waitForExistence(timeout: 5))
+        oge.tap()
+        XCTAssertTrue(app.buttons["geri"].waitForExistence(timeout: 10))
+        sleep(3)
+        cek("u3-okuyucu")
+        // renk paneli + serbest renk
+        app.buttons["arac-kalem"].tap(); sleep(1)
+        cek("u4-renk-paneli")
+        if app.buttons["renk-ozel"].exists { app.buttons["renk-ozel"].tap(); sleep(2); cek("u5-renk-secici") ; app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap(); sleep(1) }
+        // sayfaya dokununca panel kapanmalı
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap(); sleep(1)
+        cek("u6-panel-kapandi")
+        // çubuğu sağa taşı
+        let tut = app.descendants(matching: .any)["kalemTutamac"]
+        if tut.exists {
+            tut.press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+            sleep(2); cek("u7-cubuk-sagda")
+            app.descendants(matching: .any)["kalemTutamac"].press(forDuration: 0.2, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)))
+            sleep(2); cek("u8-cubuk-sol-ust")
+        }
+        // araçlar
+        if app.buttons["arac-gezin"].exists { app.buttons["arac-gezin"].tap(); sleep(1); cek("u9-gezin") }
+        if app.buttons["arac-resim"].exists { app.buttons["arac-resim"].tap(); sleep(1); cek("u10-resim-araci") }
+        // sayfa paneli + ad değiştir
+        app.buttons["icindekiler"].tap(); sleep(1)
+        app.buttons["sayfaMenu"].tap(); sleep(1)
+        if app.buttons["Çizgili sayfa ekle"].exists { app.buttons["Çizgili sayfa ekle"].tap(); sleep(1) }
+        cek("u11-sayfa-paneli")
+        let menu = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sayfa-menu-'")).firstMatch
+        if menu.exists {
+            menu.tap(); sleep(1); cek("u12-sayfa-menusu")
+            if app.buttons["Adı değiştir"].exists {
+                app.buttons["Adı değiştir"].tap()
+                let t = app.alerts.textFields.firstMatch
+                if t.waitForExistence(timeout: 3) { t.clearAndTypeText("Giriş"); app.alerts.buttons["Tamam"].tap() }
+                sleep(1); cek("u13-sayfa-adi")
+            }
+        }
+    }
+}
+
+extension XCUIElement {
+    func clearAndTypeText(_ metin: String) {
+        guard let eski = value as? String, !eski.isEmpty else { typeText(metin); return }
+        tap()
+        typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: eski.count))
+        typeText(metin)
+    }
+}

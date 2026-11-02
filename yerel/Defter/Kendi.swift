@@ -46,6 +46,7 @@ enum KendiDepo {
     }
 
     static func temizle(_ id: String) {
+        for r in Depo.partKaydi(id).resimler ?? [] { try? FileManager.default.removeItem(at: ResimDepo.url(r.dosya)) }
         var m = meta; m[id] = nil; meta = m
         for u in [pdfURL(id), Depo.kayitURL(id), Depo.taslakURL(id)] { try? FileManager.default.removeItem(at: u) }
     }
@@ -76,8 +77,20 @@ extension IcerikYonetici {
     }
     /// Kendi kitap tek bölüm + tek part'tan oluşuyorsa o part (doğrudan açılır); aksi halde nil
     func tekPart(_ d: Ders) -> PartOzet? {
-        guard d.id.hasPrefix("k-"), d.bolumler.count == 1, d.bolumler[0].partlar.count == 1 else { return nil }
+        guard d.id.hasPrefix("k-"), d.klasor != true, d.bolumler.count == 1, d.bolumler[0].partlar.count == 1 else { return nil }
         return d.bolumler[0].partlar[0]
+    }
+    /// Yeni klasör: boş açılır, içine defter/PDF ve alt klasör eklenir. Klasörün doğrudan öğeleri "bölüm 0" içinde durur.
+    func klasorOlustur(_ ad: String) {
+        kendi.append(Ders(id: KendiDepo.yeniId(), baslik: ad, kaynak: nil, bolumler: [Bolum(no: 0, baslik: ad, partlar: [])], klasor: true))
+        kendiKaydet()
+    }
+    /// Tek defterlik/PDF'lik kitabı klasöre çevirir: içindeki öğe klasörün doğrudan öğesi olur, yenileri eklenebilir
+    func klasoreCevir(_ id: String) {
+        degistir(id) { d in
+            d.klasor = true
+            if d.bolumler.count == 1 { d.bolumler[0].no = 0 }
+        }
     }
     func kitapAdi(_ id: String, _ ad: String) { degistir(id) { $0.baslik = ad } }
     func kitapSil(_ id: String) {
@@ -194,7 +207,7 @@ struct EkleDugmesi: View {
 
 // Okuyucudaki çizimleri sayfalara işleyip tek PDF yapar (paylaşmak için)
 enum PdfPaylas {
-    static func uret(belge: PDFDocument, cizimler: [String: Data], anahtar: (PDFPage) -> String?, ad: String, yazilar: [YaziKutusu] = []) -> URL? {
+    static func uret(belge: PDFDocument, cizimler: [String: Data], anahtar: (PDFPage) -> String?, ad: String, yazilar: [YaziKutusu] = [], resimler: [ResimKutusu] = []) -> URL? {
         let temiz = ad.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(temiz + ".pdf")
         let r = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: PdfUretici.sayfaGenislik, height: PdfUretici.enAzYukseklik))
@@ -208,6 +221,9 @@ enum PdfPaylas {
                     c.saveGState(); c.translateBy(x: 0, y: b.height); c.scaleBy(x: 1, y: -1)
                     p.draw(with: .mediaBox, to: c)
                     c.restoreGState()
+                    if let k = anahtar(p) {
+                        for m in resimler where m.sayfa == k { ResimDepo.yukle(m.dosya)?.draw(in: CGRect(x: m.x, y: m.y, width: m.genislik, height: m.yukseklik)) }
+                    }
                     if let k = anahtar(p), let d = cizimler[k], let cizim = try? PKDrawing(data: d) {
                         UITraitCollection(userInterfaceStyle: .light).performAsCurrent { cizim.image(from: b, scale: 2).draw(in: b) }
                     }

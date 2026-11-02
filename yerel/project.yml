@@ -49,6 +49,7 @@ targets:
           - Literata.ttf
           - PlusJakartaSans.ttf
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: Nota görsel eklemek için fotoğraf çekmek gerekir.
   DefterUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -188,6 +188,8 @@ struct KutuphaneEkrani: View {
                 Spacer()
                 // Kendi kitabın: bölüm/part yok; boş defter (sayfa deseni seç) ya da PDF. Sayfalar alt alta, yukarı-aşağı kayar.
                 Menu {
+                    Button { adIstegi = AdIstegi(baslik: "Yeni klasör", ilk: "") { icerik.klasorOlustur($0) } } label: { Label("Klasör (içine defter, PDF, alt klasör)", systemImage: "folder.badge.plus") }
+                    Divider()
                     Button { yeniDefter("cizgili") } label: { Label("Çizgili defter", systemImage: "line.3.horizontal") }
                     Button { yeniDefter("kareli") } label: { Label("Kareli defter", systemImage: "squareshape.split.3x3") }
                     Button { yeniDefter("noktali") } label: { Label("Noktalı defter", systemImage: "circle.grid.3x3") }
@@ -220,7 +222,10 @@ struct KutuphaneEkrani: View {
     }
     @ViewBuilder private func kitapMenusu(_ d: Ders) -> some View {
         if d.id.hasPrefix("k-") {
-            Button { adIstegi = AdIstegi(baslik: "Kitabın adı", ilk: d.baslik) { icerik.kitapAdi(d.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+            Button { adIstegi = AdIstegi(baslik: d.klasor == true ? "Klasörün adı" : "Kitabın adı", ilk: d.baslik) { icerik.kitapAdi(d.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+            if icerik.tekPart(d) != nil {
+                Button { icerik.klasoreCevir(d.id) } label: { Label("Klasöre çevir (içine yenilerini ekle)", systemImage: "folder.badge.plus") }
+            }
             Button(role: .destructive) { silIstegi = SilIstegi(ad: d.baslik) { icerik.kitapSil(d.id) } } label: { Label("Sil", systemImage: "trash") }
         }
     }
@@ -331,7 +336,11 @@ struct KitapEkrani: View {
     let ac: (PartOzet) -> Void
     @State private var adIstegi: AdIstegi?
     @State private var silIstegi: SilIstegi?
+    @State private var pdfSec = false
     init(ders: Ders, ac: @escaping (PartOzet) -> Void) { ilk = ders; self.ac = ac }
+    private var klasorMu: Bool { ilk.klasor == true || ders.klasor == true }
+    private var duzOgeler: [PartOzet] { ders.bolumler.first { $0.no == 0 }?.partlar ?? [] }
+    private var altKlasorler: [Bolum] { ders.bolumler.filter { $0.no != 0 } }
     private var ders: Ders { icerik.dersler.first { $0.id == ilk.id } ?? ilk }   // kendi kitaplar değişince güncel hâli
     private var kendi: Bool { ilk.id.hasPrefix("k-") }
     var body: some View {
@@ -359,6 +368,16 @@ struct KitapEkrani: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .adSorusu($adIstegi).silOnayi($silIstegi)
+        .fileImporter(isPresented: $pdfSec, allowedContentTypes: [.pdf], onCompletion: pdfAl)
+    }
+    private func yeniOge(_ desen: String) {
+        adIstegi = AdIstegi(baslik: "Yeni defter", ilk: "") { icerik.partEkle(ders.id, 0, ad: $0, desen: desen) }
+    }
+    private func pdfAl(_ sonuc: Result<URL, Error>) {
+        guard case .success(let u) = sonuc else { return }
+        let eris = u.startAccessingSecurityScopedResource()
+        defer { if eris { u.stopAccessingSecurityScopedResource() } }
+        icerik.partEkle(ders.id, 0, ad: u.deletingPathExtension().lastPathComponent, pdf: u)
     }
 
     private func sol(biten: Int, toplam: Int) -> some View {
@@ -368,6 +387,9 @@ struct KitapEkrani: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(ders.baslik).font(Tema.baslik(34, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
                 if let k = ders.kaynak { Text(k).font(Tema.yazi(14)).foregroundStyle(Tema.soluk) }
+                if klasorMu {
+                    Text("\(duzOgeler.count + altKlasorler.flatMap { $0.partlar }.count) öğe · \(altKlasorler.count) alt klasör").font(Tema.yazi(14)).foregroundStyle(Tema.soluk)
+                }
             }
             if !kendi {
                 HStack(spacing: 12) {
@@ -386,7 +408,56 @@ struct KitapEkrani: View {
         .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).camYuzey(20)
     }
 
-    private var bolumler: some View {
+    @ViewBuilder private var bolumler: some View {
+        if klasorMu { klasorIcerik } else { bolumListesi }
+    }
+
+    // Kendi klasörü: alt klasörler + doğrudan öğeler (defter / PDF). Bölüm/part katmanı zorunlu değil.
+    private var klasorIcerik: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Etiket(yazi: "İçindekiler")
+                Spacer()
+                Menu {
+                    Button { yeniOge("cizgili") } label: { Label("Çizgili defter", systemImage: "line.3.horizontal") }
+                    Button { yeniOge("kareli") } label: { Label("Kareli defter", systemImage: "squareshape.split.3x3") }
+                    Button { yeniOge("noktali") } label: { Label("Noktalı defter", systemImage: "circle.grid.3x3") }
+                    Button { yeniOge("duz") } label: { Label("Düz defter", systemImage: "doc") }
+                    Button { pdfSec = true } label: { Label("PDF ekle", systemImage: "square.and.arrow.down") }
+                    Divider()
+                    Button { adIstegi = AdIstegi(baslik: "Yeni alt klasör", ilk: "") { icerik.bolumEkle(ders.id, $0) } } label: { Label("Alt klasör", systemImage: "folder.badge.plus") }
+                } label: { EkleDugmesi(ad: "Ekle") }
+                    .accessibilityIdentifier("klasorEkle")
+            }
+            if duzOgeler.isEmpty && altKlasorler.isEmpty {
+                Text("Klasör boş. Sağ üstteki Ekle'den defter, PDF ya da alt klasör ekleyebilirsin.")
+                    .font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
+                    .padding(24).frame(maxWidth: .infinity, alignment: .leading).camYuzey(24)
+            }
+            ForEach(altKlasorler) { b in
+                NavigationLink(value: BolumSecimi(ders: ders, bolum: b)) { AltKlasorSatiri(bolum: b) }
+                    .buttonStyle(.plain).accessibilityIdentifier("altklasor-\(b.no)")
+                    .contextMenu {
+                        Button { adIstegi = AdIstegi(baslik: "Alt klasörün adı", ilk: b.baslik) { icerik.bolumAdi(ders.id, b.no, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+                        Button(role: .destructive) { silIstegi = SilIstegi(ad: b.baslik) { icerik.bolumSil(ders.id, b.no) } } label: { Label("Sil", systemImage: "trash") }
+                    }
+            }
+            if !duzOgeler.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 16, alignment: .top)], spacing: 16) {
+                    ForEach(duzOgeler) { p in
+                        PartKarti(part: p, ac: ac)
+                            .contextMenu {
+                                Button { adIstegi = AdIstegi(baslik: "Adı", ilk: p.baslik) { icerik.partAdi(ders.id, 0, p.id, $0) } } label: { Label("Adı değiştir", systemImage: "pencil") }
+                                Button(role: .destructive) { silIstegi = SilIstegi(ad: p.baslik) { icerik.partSil(ders.id, 0, p.id) } } label: { Label("Sil", systemImage: "trash") }
+                            }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var bolumListesi: some View {
         let devamNo: Int? = DevamYeri.bul(icerik)?.bolum.no
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -411,6 +482,25 @@ struct KitapEkrani: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct AltKlasorSatiri: View {
+    let bolum: Bolum
+    var body: some View {
+        HStack(spacing: 18) {
+            Image(systemName: "folder").font(.system(size: 26, weight: .light)).foregroundStyle(Tema.soluk).frame(width: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(bolum.baslik).font(Tema.baslik(21, .semibold)).multilineTextAlignment(.leading)
+                Text("\(bolum.partlar.count) öğe").font(Tema.yazi(13)).foregroundStyle(Tema.soluk)
+            }
+            Spacer(minLength: 10)
+            Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold)).foregroundStyle(Tema.soluk)
+        }
+        .padding(.horizontal, 22).padding(.vertical, 18)
+        .foregroundStyle(Tema.murekkep)
+        .camYuzey(24)
+        .contentShape(Rectangle())
     }
 }
 
@@ -452,6 +542,7 @@ struct BolumEkrani: View {
     private var ders: Ders { icerik.dersler.first { $0.id == ilkDers.id } ?? ilkDers }
     private var bolum: Bolum { ders.bolumler.first { $0.no == ilkBolum.no } ?? ilkBolum }
     private var kendi: Bool { ilkDers.id.hasPrefix("k-") }
+    private var klasorMu: Bool { ders.klasor == true }
 
     private func yeniPart(_ desen: String) {
         adIstegi = AdIstegi(baslik: "Yeni part", ilk: "Part \((bolum.partlar.map { $0.no }.max() ?? 0) + 1)") { icerik.partEkle(ders.id, bolum.no, ad: $0, desen: desen) }
@@ -470,7 +561,7 @@ struct BolumEkrani: View {
             Button { yeniPart("duz") } label: { Label("Düz sayfa", systemImage: "doc") }
             Divider()
             Button { pdfSec = true } label: { Label("PDF içe aktar", systemImage: "square.and.arrow.down") }
-        } label: { EkleDugmesi(ad: "Part ekle") }
+        } label: { EkleDugmesi(ad: klasorMu ? "Ekle" : "Part ekle") }
         .accessibilityIdentifier("partEkle")
     }
     var body: some View {
@@ -479,11 +570,19 @@ struct BolumEkrani: View {
             VStack(alignment: .leading, spacing: 28) {
                 HStack { GeriDugmesi(ad: ders.baslik); Spacer(); if kendi { ekleMenusu } }
                 HStack(alignment: .bottom, spacing: 26) {
-                    Text("\(bolum.no)").font(Tema.baslik(120, .ultraLight)).foregroundStyle(Tema.soluk).minimumScaleFactor(0.5)
+                    if klasorMu {
+                        Image(systemName: "folder").font(.system(size: 72, weight: .ultraLight)).foregroundStyle(Tema.soluk)
+                    } else {
+                        Text("\(bolum.no)").font(Tema.baslik(120, .ultraLight)).foregroundStyle(Tema.soluk).minimumScaleFactor(0.5)
+                    }
                     VStack(alignment: .leading, spacing: 8) {
                         Text(bolum.baslik).font(Tema.baslik(44, .semibold)).foregroundStyle(Tema.murekkep).fixedSize(horizontal: false, vertical: true)
-                        Text("Bölüm \(bolum.no) · \(bolum.partlar.count) part").font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
-                        IlerlemeCubugu(biten: biten, toplam: bolum.partlar.count, etiketGoster: false).frame(maxWidth: 300).padding(.top, 6)
+                        if klasorMu {
+                            Text("\(ders.baslik) · \(bolum.partlar.count) öğe").font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
+                        } else {
+                            Text("Bölüm \(bolum.no) · \(bolum.partlar.count) part").font(Tema.yazi(15)).foregroundStyle(Tema.soluk)
+                            IlerlemeCubugu(biten: biten, toplam: bolum.partlar.count, etiketGoster: false).frame(maxWidth: 300).padding(.top, 6)
+                        }
                     }
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 16, alignment: .top)], spacing: 16) {
@@ -518,7 +617,14 @@ struct PartKarti: View {
         let sag: String = part.hazir ? (durum == "bitti" ? "tamamlandı" : (bu ? "kalınan yer" : "")) : "yazılıyor"
         return Button { ac(part) } label: {
             HStack(spacing: 18) {
-                DurumDairesi(durum: durum, no: part.no, boy: 44, vurgulu: bu)
+                if part.id.hasPrefix("k-") {
+                    ZStack {
+                        Circle().strokeBorder(Tema.soluk, lineWidth: 1.5)
+                        Image(systemName: KendiDepo.meta[part.id]?.pdf == true ? "doc.richtext" : "note.text").font(.system(size: 18, weight: .regular)).foregroundStyle(Tema.soluk)
+                    }.frame(width: 44, height: 44)
+                } else {
+                    DurumDairesi(durum: durum, no: part.no, boy: 44, vurgulu: bu)
+                }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(part.baslik).font(Tema.baslik(21, .semibold)).multilineTextAlignment(.leading)
                     if let n = PartBilgisi.bolumSayisi(part.id) {

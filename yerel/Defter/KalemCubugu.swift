@@ -23,7 +23,7 @@ extension UIColor {
 }
 
 final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
-    enum Arac: String { case kalem, fosforlu, silgi, sec, metin, gezin }
+    enum Arac: String { case kalem, fosforlu, silgi, sec, metin, gezin, resim }
     enum Konum: String {
         case alt, ust, sol, sag, solAlt, sagAlt, solUst, sagUst
         var dikey: Bool { self == .sol || self == .sag }
@@ -79,12 +79,12 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Çizim yapan araçlarda (kalem, fosforlu, silgi) tuvalin çizim jesti açık olur; seç/yazı/gezin araçlarında kapalı.
-    var cizimAktif: Bool { arac != .sec && arac != .metin && arac != .gezin }
+    var cizimAktif: Bool { arac != .sec && arac != .metin && arac != .gezin && arac != .resim }
 
     /// Canvas'ın kullanacağı PencilKit aracı
     var pkArac: PKTool {
         switch arac {
-        case .kalem, .sec, .metin, .gezin: return PKInkingTool(.pen, color: renk(.kalem), width: kalinlik[.kalem] ?? 3)
+        case .kalem, .sec, .metin, .gezin, .resim: return PKInkingTool(.pen, color: renk(.kalem), width: kalinlik[.kalem] ?? 3)
         case .fosforlu: return PKInkingTool(.marker, color: renk(.fosforlu), width: kalinlik[.fosforlu] ?? 18)
         case .silgi: return silgiVektor ? PKEraserTool(.vector) : PKEraserTool(.bitmap, width: silgiBoyu)
         }
@@ -131,7 +131,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         let ileri = simge("arrow.uturn.forward", "Yinele") { [weak self] in self?.yinele?() }
         geri.accessibilityIdentifier = "kalemGeri"; ileri.accessibilityIdentifier = "kalemYinele"
         let ayrac0 = ayirici(), ayrac1 = ayirici(), ayrac2 = ayirici()
-        let bilgi: [(Arac, String, String)] = [(.kalem, "pencil.tip", "Kalem"), (.fosforlu, "highlighter", "Fosforlu"), (.silgi, "eraser", "Silgi"), (.sec, "lasso", "Seç"), (.metin, "textformat", "Yazı kutusu"), (.gezin, "arrow.up.and.down.and.arrow.left.and.right", "Gezin (kalemle kaydır)")]
+        let bilgi: [(Arac, String, String)] = [(.kalem, "pencil.tip", "Kalem"), (.fosforlu, "highlighter", "Fosforlu"), (.silgi, "eraser", "Silgi"), (.sec, "lasso", "Seç"), (.metin, "textformat", "Yazı kutusu"), (.gezin, "arrow.up.and.down.and.arrow.left.and.right", "Gezin (kalemle kaydır)"), (.resim, "photo", "Görsel (taşı, boyutlandır)")]
         var araclar: [UIView] = []
         for (a, s, ad) in bilgi {
             let b = simge(s, ad) { [weak self] in self?.dokunuldu(a) }
@@ -340,6 +340,7 @@ final class KalemCubugu: UIView, UIColorPickerViewControllerDelegate {
         let gosterilen = arac == .fosforlu ? Arac.fosforlu : Arac.kalem
         renkDaire.backgroundColor = renk(gosterilen)
         renkDaire.layer.borderColor = Tema.camKenarUI.resolvedColor(with: traitCollection).cgColor
+        setNeedsLayout()
     }
 
     /// Silgi paneli: parça silme / çizgiyi tamamen silme + boyut
