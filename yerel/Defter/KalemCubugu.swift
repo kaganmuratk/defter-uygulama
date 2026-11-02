@@ -456,8 +456,10 @@ final class KalemCubugu: UIView {
         seciciArac = a
         var h: CGFloat = 0, sa: CGFloat = 0, b: CGFloat = 0, al: CGFloat = 0
         renk(a).getHue(&h, saturation: &sa, brightness: &b, alpha: &al)
-        renkAlani.baslat(ton: h, doygunluk: sa, parlaklik: max(b, 0.05))
-        parlaklikCubugu.value = Float(max(b, 0.05))
+        // Siyaha yakın bir renkten açılınca alan baştan simsiyah görünmesin: canlı tonlarla başla
+        let acilis = b < 0.35 ? 1 : b
+        renkAlani.baslat(ton: h, doygunluk: sa, parlaklik: acilis)
+        parlaklikCubugu.value = Float(acilis)
         ozelGuncelle(uygula: false)
         renkSatiri.isHidden = true; kalinlikCubugu.isHidden = true; silgiModu.isHidden = true; ozelPanel.isHidden = false
         ayarGizleme?.cancel()        // renk seçilirken panel kendiliğinden kapanmaz
