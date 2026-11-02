@@ -51,6 +51,9 @@ struct PartKaydi: Codable, Equatable {
     var notlar: [YapiskanNot] = []
     var ekSayfalar: [EkSayfa] = []
     var yaziKutulari: [YaziKutusu]? = nil   // sayfaya yazılan metin kutuları (eski kayıtlarda yok)
+    var sayfaAdlari: [String: String]? = nil   // sayfa anahtarı → kullanıcının verdiği ad
+    var sira: [String]? = nil                  // kendi part'larda sayfaların tam sırası (sayfa anahtarları)
+    var silinen: [String]? = nil               // kendi part'larda silinen içerik sayfaları ("b<i>")
     var zaman: Double = 0                   // son kayıt (ms), senkronda son yazan kazanır
 }
 struct YaziKutusu: Codable, Equatable, Identifiable {

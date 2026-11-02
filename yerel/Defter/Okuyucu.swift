@@ -103,6 +103,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         for (i, b) in bilgi.enumerated() { if let p = doc.page(at: i) { anahtarlar[ObjectIdentifier(p)] = b.anahtar } }
         // Eklenen boş sayfaları yerlerine koy (sırayla; bir ek sayfa başka bir ek sayfanın ardından gelebilir)
         for ek in kayit.ekSayfalar { ekSayfaYerlestir(ek, belge: doc) }
+        if kendiPart { sayfaDuzeniniUygula(doc) }
         pdfView.document = doc
         yukleniyor.stopAnimating()
         paneliGuncelle()
@@ -161,6 +162,10 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         panel.baslik = part.baslik
         panel.ust = ""
         panel.git = { [weak self] anahtar in self?.sayfayaGit(anahtar) }
+        panel.siralanabilir = kendiPart
+        panel.adDegistir = { [weak self] k in self?.sayfaAdlandir(k) }
+        panel.sil = { [weak self] k in self?.sayfaSilSor(k) }
+        panel.tasi = { [weak self] k, h in self?.sayfaTasi(k, oncesine: h) }
         panel.notAc = { [weak self] id in
             guard let self, let n = self.kayit.notlar.first(where: { $0.id == id }) else { return }
             self.sayfayaGit(n.sayfa); self.notuAc(id)
@@ -181,7 +186,12 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             guard let p = doc.page(at: i), let a = anahtarlar[ObjectIdentifier(p)] else { continue }
             let b = sayfalar.first(where: { $0.anahtar == a })
             let tur = String(a.prefix(1))
-            satirlar.append(.init(id: a, baslik: b?.baslik ?? "Not sayfası", tur: tur, no: tur == "b" ? (b?.bolumSira).map { $0 + 1 } : nil))
+            let ad: String
+            if let o = kayit.sayfaAdlari?[a] { ad = o }
+            else if kendiPart { ad = "Sayfa \(i + 1)" }
+            else { ad = b?.baslik ?? "Not sayfası" }
+            let no: Int? = kendiPart ? i + 1 : (tur == "b" ? (b?.bolumSira).map { $0 + 1 } : nil)
+            satirlar.append(.init(id: a, baslik: ad, tur: tur, no: no, duzenle: a.hasPrefix("e") || kendiPart))
         }
         panel.satirlar = satirlar
         panel.notlar = kayit.notlar
@@ -254,7 +264,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         k.tuval.drawingPolicy = (Ayar.ornek || kalemCubugu.parmakla) ? .anyInput : .pencilOnly
         k.tuval.tool = kalemCubugu.pkArac
         k.tuval.isRulerActive = kalemCubugu.cetvel
-        k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec && kalemCubugu.arac != .metin
+        k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.cizimAktif
         k.secim.etkin = kalemCubugu.arac == .sec
         k.secim.olcek = max(pdfView.scaleFactor, 0.3)
         k.secim.metinHazir = { [weak self, weak k] metin, alan in self?.metinOnayla(k, metin, alan) }
@@ -297,6 +307,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kirli = true
         taslakPlanla()
     }
+    func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) { kalemCubugu.ayariKapat() }
     func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
         if ciftDokunusSilgisi, kalemCubugu.arac == .silgi {
             ciftDokunusSilgisi = false
@@ -308,12 +319,14 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func kurKalemCubugu() {
         kalemCubugu.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(kalemCubugu)
+        // Çubuk okuyucu alanının tamamını kaplar ve kendi içinde konumlanır (taşınabilir); boş yerlerden dokunuşlar PDF'e geçer
         NSLayoutConstraint.activate([
-            kalemCubugu.centerXAnchor.constraint(equalTo: pdfView.centerXAnchor),
-            kalemCubugu.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            kalemCubugu.leadingAnchor.constraint(greaterThanOrEqualTo: pdfView.leadingAnchor, constant: 12),
-            kalemCubugu.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+            kalemCubugu.topAnchor.constraint(equalTo: pdfView.topAnchor),
+            kalemCubugu.bottomAnchor.constraint(equalTo: pdfView.bottomAnchor),
+            kalemCubugu.leadingAnchor.constraint(equalTo: pdfView.leadingAnchor),
+            kalemCubugu.trailingAnchor.constraint(equalTo: pdfView.trailingAnchor),
         ])
+        kalemCubugu.sunum = { [weak self] vc in self?.present(vc, animated: true) }
         kalemCubugu.aracDegisti = { [weak self] in self?.aracUygula() }
         kalemCubugu.geriAl = { [weak self] in self?.kendiGeriAlma.undo() }
         kalemCubugu.yinele = { [weak self] in self?.kendiGeriAlma.redo() }
@@ -326,10 +339,22 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func aracUygula() {
         for k in katmanlar.values {
             k.tuval.tool = kalemCubugu.pkArac
-            k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.arac != .sec && kalemCubugu.arac != .metin
+            k.tuval.drawingGestureRecognizer.isEnabled = kalemCubugu.cizimAktif
             k.secim.etkin = kalemCubugu.arac == .sec
             k.yaziModu(kalemCubugu.arac == .metin)
         }
+        // Gezin aracı: Apple Pencil ile de sayfa kaydırılır/sürüklenir (normalde yalnız parmak kaydırır)
+        let tipler: [NSNumber] = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        let pencil = NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        pdfKaydirma?.panGestureRecognizer.allowedTouchTypes = kalemCubugu.arac == .gezin ? tipler + [pencil] : tipler
+    }
+    private var pdfKaydirma: UIScrollView? {
+        func bul(_ v: UIView) -> UIScrollView? {
+            if let s = v as? UIScrollView, !(s is PKCanvasView) { return s }
+            for a in v.subviews { if let s = bul(a) { return s } }
+            return nil
+        }
+        return bul(pdfView)
     }
 
     // MARK: Yazı kutuları ve metne çevirme
@@ -470,6 +495,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
     // MARK: Şekil / tablo atıfları
     @objc private func pdfDokunuldu(_ g: UITapGestureRecognizer) {
+        kalemCubugu.ayariKapat()
         let n = g.location(in: pdfView)
         guard let sayfa = pdfView.page(for: n, nearest: false), let anahtar = anahtarlar[ObjectIdentifier(sayfa)],
               let atiflar = sayfalar.first(where: { $0.anahtar == anahtar })?.atiflar else { return }
@@ -555,19 +581,98 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         anahtarlar[ObjectIdentifier(s)] = "e" + ek.id
         doc.insert(s, at: doc.index(for: p) + 1)
         kayit.ekSayfalar.append(ek)
+        sirayiKaydet()
         kirli = true; taslakPlanla(); paneliGuncelle()
         pdfView.go(to: s)
     }
+    /// Üst menüdeki "Bu sayfayı sil": şu an görünen sayfa
     private func sayfaSil() {
-        guard let doc = pdfView.document, let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)], anahtar.hasPrefix("e") else { return }
-        let id = String(anahtar.dropFirst())
-        let onceki = kayit.ekSayfalar.first(where: { $0.id == id })?.sonra ?? ""
-        for i in kayit.ekSayfalar.indices where kayit.ekSayfalar[i].sonra == anahtar { kayit.ekSayfalar[i].sonra = onceki }
-        kayit.ekSayfalar.removeAll { $0.id == id }
+        if let a = anlikAnahtar { sayfaSilSor(a) }
+    }
+    private func sayfaIndeksi(_ anahtar: String) -> Int? {
+        guard let doc = pdfView.document else { return nil }
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == anahtar { return i } }
+        return nil
+    }
+    private func silinebilirMi(_ k: String) -> Bool { k.hasPrefix("e") || kendiPart }
+
+    /// Kendi not/PDF'lerde sayfaların tam sırası kayıtta tutulur (eklenen, silinen, taşınan sayfalar dahil)
+    private func sirayiKaydet() {
+        guard kendiPart, let doc = pdfView.document else { return }
+        var yeni: [String] = []
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), let a = anahtarlar[ObjectIdentifier(p)] { yeni.append(a) } }
+        kayit.sira = yeni
+    }
+    /// Açılışta: silinen içerik sayfalarını çıkar, kayıtlı sıraya diz
+    private func sayfaDuzeniniUygula(_ doc: PDFDocument) {
+        for a in kayit.silinen ?? [] {
+            for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == a { doc.removePage(at: i); break } }
+        }
+        guard let sira = kayit.sira else { return }
+        var mevcut: [String: PDFPage] = [:]
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), let a = anahtarlar[ObjectIdentifier(p)] { mevcut[a] = p } }
+        var yeni: [PDFPage] = sira.compactMap { mevcut[$0] }
+        let kullanilan = Set(sira)
+        for i in 0..<doc.pageCount { if let p = doc.page(at: i), let a = anahtarlar[ObjectIdentifier(p)], !kullanilan.contains(a) { yeni.append(p) } }
+        guard yeni.count == doc.pageCount else { return }
+        for i in (0..<doc.pageCount).reversed() { doc.removePage(at: i) }
+        for (i, p) in yeni.enumerated() { doc.insert(p, at: i) }
+    }
+
+    /// Sol panelden sürükleyerek sıralama: k sayfası, hedef sayfasının yerine girer (aşağı çekilince altına, yukarı çekilince üstüne)
+    private func sayfaTasi(_ k: String, oncesine hedef: String) {
+        guard kendiPart, k != hedef, let doc = pdfView.document, let a = sayfaIndeksi(k), let b = sayfaIndeksi(hedef), let p = doc.page(at: a) else { return }
+        let gorunen = pdfView.currentPage
+        doc.removePage(at: a)
+        let h = sayfaIndeksi(hedef) ?? doc.pageCount
+        doc.insert(p, at: min(a < b ? h + 1 : h, doc.pageCount))
+        sirayiKaydet()
+        kirli = true; taslakPlanla(); paneliGuncelle()
+        if let g = gorunen { pdfView.go(to: g) }
+    }
+
+    private func sayfaAdlandir(_ k: String) {
+        let su = panel.satirlar.first { $0.id == k }?.baslik ?? ""
+        let a = UIAlertController(title: "Sayfa adı", message: "Boş bırakırsan varsayılan ad kullanılır.", preferredStyle: .alert)
+        a.addTextField { $0.text = su; $0.clearButtonMode = .whileEditing; $0.autocapitalizationType = .sentences; $0.accessibilityIdentifier = "sayfa-adi" }
+        a.addAction(UIAlertAction(title: "Tamam", style: .default) { [weak self, weak a] _ in
+            guard let self else { return }
+            let t = (a?.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var m = self.kayit.sayfaAdlari ?? [:]
+            m[k] = t.isEmpty ? nil : t
+            self.kayit.sayfaAdlari = m.isEmpty ? nil : m
+            self.kirli = true; self.taslakPlanla(); self.paneliGuncelle()
+        })
+        a.addAction(UIAlertAction(title: "Vazgeç", style: .cancel))
+        present(a, animated: true)
+    }
+
+    private func sayfaSilSor(_ k: String) {
+        guard silinebilirMi(k) else { bilgiGoster("Bu sayfa silinemez"); return }
+        guard (pdfView.document?.pageCount ?? 0) > 1 else { bilgiGoster("Son sayfa silinemez"); return }
+        let ad = panel.satirlar.first { $0.id == k }?.baslik ?? "Sayfa"
+        let a = UIAlertController(title: "“\(ad)” silinsin mi?", message: "Sayfadaki çizimler, yazılar ve notlar da silinir.", preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "Sil", style: .destructive) { [weak self] _ in self?.sayfaSilUygula(k) })
+        a.addAction(UIAlertAction(title: "Vazgeç", style: .cancel))
+        present(a, animated: true)
+    }
+    private func sayfaSilUygula(_ anahtar: String) {
+        guard let doc = pdfView.document, let i = sayfaIndeksi(anahtar), doc.pageCount > 1 else { return }
+        if anahtar.hasPrefix("e") {
+            let id = String(anahtar.dropFirst())
+            let onceki = kayit.ekSayfalar.first(where: { $0.id == id })?.sonra ?? ""
+            for j in kayit.ekSayfalar.indices where kayit.ekSayfalar[j].sonra == anahtar { kayit.ekSayfalar[j].sonra = onceki }
+            kayit.ekSayfalar.removeAll { $0.id == id }
+        } else {
+            kayit.silinen = (kayit.silinen ?? []) + [anahtar]
+        }
         kayit.cizimler[anahtar] = nil
         kayit.notlar.removeAll { $0.sayfa == anahtar }
         kayit.yaziKutulari?.removeAll { $0.sayfa == anahtar }
-        doc.removePage(at: doc.index(for: p))
+        kayit.sayfaAdlari?[anahtar] = nil
+        katmanlar[anahtar] = nil
+        doc.removePage(at: i)
+        sirayiKaydet()
         kirli = true; taslakPlanla(); paneliGuncelle()
     }
 
@@ -648,7 +753,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let geri = ustDugme("Geri", sembol: "chevron.left") { [weak self] in self?.cik() }
         geri.accessibilityIdentifier = "geri"
         geri.toolTip = "Kütüphaneye dön"
-        baslikEtiket.text = "Part \(part.no) · \(part.baslik)"
+        baslikEtiket.text = part.id.hasPrefix("k-") ? part.baslik : "Part \(part.no) · \(part.baslik)"
         baslikEtiket.font = Tema.uiBaslik(17, 600)
         baslikEtiket.textColor = Tema.murekkepUI
         baslikEtiket.lineBreakMode = .byTruncatingTail
@@ -678,7 +783,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             UIMenu(options: .displayInline, children: [
                 UIAction(title: "PDF olarak paylaş", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in self?.paylas(sayfaMenu) },
                 UIAction(title: "Notları gizle / göster", image: UIImage(systemName: "eye.slash")) { [weak self] _ in self?.notlariDegistir() },
-                UIAction(title: "Bu not sayfasını sil", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in self?.sayfaSil() },
+                UIAction(title: "Bu sayfayı sil", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in self?.sayfaSil() },
             ]),
         ])
 
