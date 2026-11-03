@@ -702,14 +702,23 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         c.filter = .images; c.selectionLimit = 1
         let p = PHPickerViewController(configuration: c)
         p.delegate = self
-        present(p, animated: true)
+        enUstteSun(p, ad: "galeri")
     }
     private func kameraAc() {
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else { bilgiGoster("Kamera kullanılamıyor"); return }
         let p = UIImagePickerController()
         p.sourceType = .camera
         p.delegate = self
-        present(p, animated: true)
+        enUstteSun(p, ad: "kamera")
+    }
+    /// Açık bir ekran (panel, uyarı, menü kapanışı) varsa onun üstünden açar; açılmazsa tanı günlüğüne yazar
+    private func enUstteSun(_ vc: UIViewController, ad: String) {
+        var ust: UIViewController = self
+        while let s = ust.presentedViewController { ust = s }
+        if ust !== self { Tani.yaz("\(ad) açılırken üstte ekran vardı", String(describing: type(of: ust))) }
+        ust.present(vc, animated: true) { [weak vc] in
+            if vc?.presentingViewController == nil { Tani.yaz("\(ad) gösterilmedi") }
+        }
     }
     /// Seçilen/çekilen görseli şu an görünen sayfanın ortasına koyar ve Görsel aracını açar
     private func resmiYerlestir(_ img: UIImage) {

@@ -275,6 +275,20 @@ final class Tur5Sinavi: XCTestCase {
         // araçlar
         if app.buttons["arac-gezin"].exists { app.buttons["arac-gezin"].tap(); sleep(1); cek("u9-gezin") }
         if app.buttons["arac-resim"].exists { app.buttons["arac-resim"].tap(); sleep(1); cek("u10-resim-araci") }
+        // görsel ekle: sayfa menüsü → Görsel ekle → Galeriden seç, seçici açılmalı
+        app.buttons["sayfaMenu"].tap(); sleep(1)
+        let gorsel = app.buttons["Görsel ekle"]
+        XCTAssertTrue(gorsel.waitForExistence(timeout: 5), "Görsel ekle menüsü yok")
+        cek("u10b-sayfa-menusu")
+        gorsel.tap(); sleep(1)
+        let galeri = app.buttons["Galeriden seç"]
+        XCTAssertTrue(galeri.waitForExistence(timeout: 5), "Galeriden seç yok")
+        cek("u10c-gorsel-alt-menu")
+        galeri.tap(); sleep(3)
+        cek("u10d-galeri-acildi")
+        let kapat = app.buttons["Cancel"].exists ? app.buttons["Cancel"] : app.buttons["İptal"]
+        XCTAssertTrue(kapat.waitForExistence(timeout: 5), "Galeri seçici açılmadı")
+        kapat.tap(); sleep(1)
         // sayfa paneli + ad değiştir
         app.buttons["icindekiler"].tap(); sleep(1)
         app.buttons["sayfaMenu"].tap(); sleep(1)
