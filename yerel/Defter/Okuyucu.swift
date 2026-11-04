@@ -3,6 +3,7 @@ import PDFKit
 import PencilKit
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 // Okuyucu: part PDF'i (PDFKit) + her sayfanın üstünde PencilKit tuvali (PDFPageOverlayViewProvider).
 // Yakınlaştırma, kaydırma, avuç reddi, kalem türleri/renk/kalınlık/silgi (PKToolPicker) Apple'dan hazır gelir.
@@ -722,7 +723,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
     /// Seçilen/çekilen görseli şu an görünen sayfanın ortasına koyar ve Görsel aracını açar
     private func resmiYerlestir(_ img: UIImage) {
-        guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)], let k = ResimDepo.kaydet(img) else { bilgiGoster("Görsel eklenemedi"); return }
+        guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)], let k = ResimDepo.kaydet(img) else { Tani.yaz("görsel yerleştirilemedi", "sayfa/anahtar/kayıt"); bilgiGoster("Görsel eklenemedi"); return }
         let boy = p.bounds(for: .mediaBox)
         let merkez = pdfView.convert(CGPoint(x: pdfView.bounds.midX, y: pdfView.bounds.midY), to: p)
         let oran = k.boyut.height / max(k.boyut.width, 1)
@@ -1183,10 +1184,18 @@ final class BosSayfa: PDFPage {
 extension OkuyucuKontrol: PHPickerViewControllerDelegate {
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
-        guard let ip = results.first?.itemProvider, ip.canLoadObject(ofClass: UIImage.self) else { return }
-        ip.loadObject(ofClass: UIImage.self) { [weak self] nesne, _ in
-            guard let img = nesne as? UIImage else { return }
-            DispatchQueue.main.async { self?.resmiYerlestir(img) }
+        guard let ip = results.first?.itemProvider else { Tani.yaz("galeri: seçim boş"); return }
+        // loadObject(UIImage) HEIC/iCloud fotoğraflarda sessizce boş dönebiliyor; ham veriyi isteyip kendimiz çözüyoruz
+        ip.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] veri, hata in
+            let img = veri.flatMap { UIImage(data: $0) }
+            DispatchQueue.main.async {
+                guard let img else {
+                    Tani.yaz("galeri: görsel okunamadı", hata?.localizedDescription ?? "veri yok")
+                    self?.bilgiGoster("Görsel okunamadı" + (hata.map { " · \($0.localizedDescription)" } ?? ""))
+                    return
+                }
+                self?.resmiYerlestir(img)
+            }
         }
     }
 }
