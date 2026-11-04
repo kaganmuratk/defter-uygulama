@@ -30,6 +30,7 @@ final class KalemCubugu: UIView {
     }
 
     var aracDegisti: (() -> Void)?
+    var resimEkle: ((UIView) -> Void)?
     var geriAl: (() -> Void)?
     var yinele: (() -> Void)?
     var cetvelDegisti: ((Bool) -> Void)?
@@ -339,6 +340,7 @@ final class KalemCubugu: UIView {
     private func dokunuldu(_ a: Arac) {
         if a == arac, a == .kalem || a == .fosforlu || a == .silgi { ayarDugmesi(); return }
         sec(a)
+        if a == .resim, let b = aracDugmeleri[a] { resimEkle?(b) }
     }
     /// Renk dairesi ya da etkin aracın tekrar dokunulması: ayar paneli açıksa kapanır, kapalıysa açılır
     private func ayarDugmesi() {

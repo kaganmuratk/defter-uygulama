@@ -333,6 +333,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             kalemCubugu.trailingAnchor.constraint(equalTo: pdfView.trailingAnchor),
         ])
         kalemCubugu.aracDegisti = { [weak self] in self?.aracUygula() }
+        kalemCubugu.resimEkle = { [weak self] kaynak in self?.resimEkleSor(kaynak) }
         kalemCubugu.geriAl = { [weak self] in self?.kendiGeriAlma.undo() }
         kalemCubugu.yinele = { [weak self] in self?.kendiGeriAlma.redo() }
         kalemCubugu.cetvelDegisti = { [weak self] acik in self?.katmanlar.values.forEach { $0.tuval.isRulerActive = acik } }
@@ -704,6 +705,16 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let p = PHPickerViewController(configuration: c)
         p.delegate = self
         enUstteSun(p, ad: "galeri")
+    }
+    /// Çubuktaki Görsel düğmesi: yeni görsel ekletir (var olanları taşımak/boyutlandırmak araç açıkken zaten çalışır)
+    private func resimEkleSor(_ kaynak: UIView) {
+        let a = UIAlertController(title: "Görsel ekle", message: nil, preferredStyle: .actionSheet)
+        a.addAction(UIAlertAction(title: "Galeriden seç", style: .default) { [weak self] _ in self?.galeriAc() })
+        a.addAction(UIAlertAction(title: "Fotoğraf çek", style: .default) { [weak self] _ in self?.kameraAc() })
+        a.addAction(UIAlertAction(title: "Vazgeç (mevcut görselleri düzenle)", style: .cancel))
+        a.popoverPresentationController?.sourceView = kaynak
+        a.popoverPresentationController?.sourceRect = kaynak.bounds
+        enUstteSun(a, ad: "görsel menüsü")
     }
     private func kameraAc() {
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else { bilgiGoster("Kamera kullanılamıyor"); return }
