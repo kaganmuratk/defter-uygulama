@@ -83,6 +83,11 @@ final class KalemCubugu: UIView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Yapışkan not düzenleyicisinde yalnız kalem, fosforlu ve silgi görünür (seç/yazı/gezin/görsel sayfa içindir)
+    var sadeceCizim = false {
+        didSet { for a in [Arac.sec, .metin, .gezin, .resim] { aracDugmeleri[a]?.isHidden = sadeceCizim } }
+    }
+
     /// Çizim yapan araçlarda (kalem, fosforlu, silgi) tuvalin çizim jesti açık olur; seç/yazı/gezin araçlarında kapalı.
     var cizimAktif: Bool { arac != .sec && arac != .metin && arac != .gezin && arac != .resim }
 

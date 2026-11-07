@@ -286,9 +286,20 @@ final class SecimKontrol: NSObject {
         guard let k = katman else { return }
         var d = k.tuval.drawing
         var yeniler: [Int] = []
-        for s in ayrilanCizgiler {
-            var n = s
-            n.transform = s.transform.concatenating(canliDonusum)
+        let tasinan = ayrilanCizgiler.map { s -> PKStroke in var n = s; n.transform = s.transform.concatenating(canliDonusum); return n }
+        // Kutu başka bir sayfanın üstüne bırakıldıysa çizgiler o sayfaya geçer
+        if !tasinan.isEmpty, !k.bounds.contains(CGPoint(x: kutu.frame.midX, y: kutu.frame.midY)),
+           k.baskaSayfayaBirak?(tasinan, CGPoint(x: kutu.frame.midX, y: kutu.frame.midY)) == true {
+            hayalGorunum?.removeFromSuperview(); hayalGorunum = nil
+            ayrilanCizgiler = []
+            k.secimSuruyor = false
+            if let o = hareketOncesi { geriAlmaKaydet(o) }
+            hareketOncesi = nil
+            k.cizimDegisti?()
+            birak()
+            return
+        }
+        for n in tasinan {
             d.strokes.append(n)
             yeniler.append(d.strokes.count - 1)
         }
@@ -301,6 +312,13 @@ final class SecimKontrol: NSObject {
         hareketOncesi = nil
         k.cizimDegisti?()
         kutuGoster()
+    }
+
+    // MARK: Şekil düzeltme (çizgi sonunda bekleyince)
+    func sonCizgiyiDuzelt() {
+        guard let k = katman, let son = k.tuval.drawing.strokes.last, Date().timeIntervalSince(son.path.creationDate) < 6 else { return }
+        guard let yeni = SekilTanima.duzelt(son) else { return }
+        degistir { d in d.strokes[d.strokes.count - 1] = yeni }
     }
 
     // MARK: Geri alma
@@ -422,9 +440,9 @@ final class SecimKontrol: NSObject {
     }
 
     /// Panodaki çizgileri verilen merkeze yapıştırır ve seçer
-    func yapistir(merkez: CGPoint) {
-        guard !SecimPanosu.kopya.isEmpty else { return }
-        let kopya = SecimPanosu.kopya
+    func yapistir(merkez: CGPoint, cizgiler: [PKStroke]? = nil) {
+        let kopya = cizgiler ?? SecimPanosu.kopya
+        guard !kopya.isEmpty else { return }
         var u = kopya[0].renderBounds
         for s in kopya.dropFirst() { u = u.union(s.renderBounds) }
         let T = CGAffineTransform(translationX: merkez.x - u.midX, y: merkez.y - u.midY)

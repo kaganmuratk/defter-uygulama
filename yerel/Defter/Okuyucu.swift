@@ -283,6 +283,16 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if let d = kayit.cizimler[anahtar], let cizim = try? PKDrawing(data: d) { k.tuval.drawing = cizim }
         k.notAc = { [weak self] id in self?.notuAc(id) }
         k.notTasindi = { [weak self] id, nokta in self?.notTasi(id, nokta) }
+        k.notPencereyeBirakildi = { [weak self] id, nokta, w in self?.notPencereyeBirak(id, nokta, w) }
+        k.notlarYenile = { [weak self] in self?.notlariTazele() }
+        k.baskaSayfayaBirak = { [weak self, weak k] cizgiler, nokta in
+            guard let self, let k else { return false }
+            let pn = self.pdfView.convert(nokta, from: k)
+            guard let sayfa = self.pdfView.page(for: pn, nearest: false), let anahtar = self.anahtarlar[ObjectIdentifier(sayfa)], anahtar != k.anahtar, let hedef = self.katmanlar[anahtar] else { return false }
+            let m = self.pdfView.convert(pn, to: sayfa), boy = sayfa.bounds(for: .mediaBox)
+            hedef.secim.yapistir(merkez: CGPoint(x: m.x, y: boy.height - m.y), cizgiler: cizgiler)
+            return true
+        }
         k.notSil = { [weak self] id in self?.notSil(id) }
         k.notlariGoster(kayit.notlar.filter { $0.sayfa == anahtar }, gizli: notlarGizli)
         katmanlar[anahtar] = k
@@ -529,18 +539,15 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
 
     // MARK: Kayıt
+    /// Otomatik kayıt (Kağan 2026-11-07): değişiklikten ~1,5 sn sonra kendiliğinden gerçek kayda yazılır; çıkarken soru sorulmaz.
     private func taslakPlanla() {
         panel.notlar = kayit.notlar
         taslakIsi?.cancel()
-        let is_ = DispatchWorkItem { [weak self] in
-            guard let self, !Ayar.ornek else { return }
-            for k in self.katmanlar.values { self.cizimiAl(k) }
-            Depo.yaz(self.kayit, Depo.taslakURL(self.part.id))
-        }
+        let is_ = DispatchWorkItem { [weak self] in self?.kaydet(sessiz: true) }
         taslakIsi = is_
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: is_)
     }
-    private func kaydet() {
+    private func kaydet(sessiz: Bool = false) {
         for k in katmanlar.values { cizimiAl(k) }
         kayit.zaman = Zaman.simdi
         taslakIsi?.cancel()
@@ -550,7 +557,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             Yedek.ortak.planla()
         }
         kirli = false
-        bilgiGoster("Kaydedildi")
+        if !sessiz { bilgiGoster("Kaydedildi") }
     }
     private func vazgec() {
         taslakIsi?.cancel()
@@ -560,12 +567,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private func cik() { kirliyseSor { [weak self] in self?.kapat?() } }
     /// Kaydedilmemiş değişiklik varsa sorar; sonra `devam` çalışır (Pencil/palet temizliği dahil).
     private func kirliyseSor(_ devam: @escaping () -> Void) {
-        guard kirli else { temizle(); devam(); return }
-        let a = UIAlertController(title: "Çizimler kaydedilsin mi?", message: "Kaydedilmezse bu oturumdaki çizimler, notlar ve eklenen sayfalar silinir.", preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "Kaydet", style: .default) { [weak self] _ in self?.kaydet(); self?.temizle(); devam() })
-        a.addAction(UIAlertAction(title: "Vazgeç, sil", style: .destructive) { [weak self] _ in self?.vazgec(); self?.temizle(); devam() })
-        a.addAction(UIAlertAction(title: "İptal", style: .cancel))
-        present(a, animated: true)
+        if kirli { kaydet(sessiz: true) }   // soru yok: değişiklikler çıkarken de kaydedilir
+        temizle(); devam()
     }
     private func temizle() {
         Senkron.ortak.acikPart = nil
@@ -794,6 +797,22 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kayit.notlar[i].x = Double(nokta.x); kayit.notlar[i].y = Double(nokta.y)
         kirli = true; taslakPlanla()
     }
+    private func notlariTazele() {
+        for (anahtar, k) in katmanlar { k.notlariGoster(kayit.notlar.filter { $0.sayfa == anahtar }, gizli: notlarGizli) }
+    }
+    /// Not başka bir sayfanın üstüne bırakılınca o sayfaya taşınır (aynı sayfadaysa yalnız yeri değişir).
+    private func notPencereyeBirak(_ id: String, _ nokta: CGPoint, _ pencere: UIWindow) {
+        guard let i = kayit.notlar.firstIndex(where: { $0.id == id }) else { return }
+        let pn = pdfView.convert(nokta, from: pencere)
+        if let sayfa = pdfView.page(for: pn, nearest: true), let anahtar = anahtarlar[ObjectIdentifier(sayfa)] {
+            let pdfNokta = pdfView.convert(pn, to: sayfa), boy = sayfa.bounds(for: .mediaBox)
+            kayit.notlar[i].sayfa = anahtar
+            kayit.notlar[i].x = Double(min(max(pdfNokta.x, 23), boy.width - 23))
+            kayit.notlar[i].y = Double(min(max(boy.height - pdfNokta.y, 23), boy.height - 23))
+            kirli = true; taslakPlanla()
+        }
+        notlariTazele()
+    }
     private func notSil(_ id: String) {
         guard let not = kayit.notlar.first(where: { $0.id == id }) else { return }
         kayit.notlar.removeAll { $0.id == id }
@@ -955,6 +974,8 @@ final class SayfaKatmani: UIView {
     let tuval = PKCanvasView()
     var secimSuruyor = false                 // seçim aracı çizimi değiştirirken kayıt olayı bastırılır
     var cizimDegisti: (() -> Void)?          // seçim aracı işini bitirince okuyucuya haber
+    var baskaSayfayaBirak: (([PKStroke], CGPoint) -> Bool)?   // seçim başka sayfaya sürüklendi (katman noktası)
+    var sekilDuzelt: (() -> Void)?
     lazy var secim = SecimKontrol(katman: self)
     var yaziDegisti: ((YaziKutusu) -> Void)?
     var yaziSilindi: ((String) -> Void)?
@@ -968,7 +989,9 @@ final class SayfaKatmani: UIView {
     private var resimModuAcik = false
     var notAc: ((String) -> Void)?
     var notTasindi: ((String, CGPoint) -> Void)?
+    var notPencereyeBirakildi: ((String, CGPoint, UIWindow) -> Void)?
     var notSil: ((String) -> Void)?
+    var notlarYenile: (() -> Void)?
     private var rozetler: [String: NotRozeti] = [:]
 
     init(anahtar: String, sayfaBoyu: CGSize) {
@@ -989,6 +1012,13 @@ final class SayfaKatmani: UIView {
         resimIptal.delegate = self
         resimIptal.isEnabled = false
         addGestureRecognizer(resimIptal)
+        clipsToBounds = false                    // sürüklenen seçim sayfa kenarında kesilmesin
+        let durak = DurakGozcusu(target: nil, action: nil)
+        durak.durdu = { [weak self] in
+            guard let self, self.tuval.tool is PKInkingTool else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.secim.sonCizgiyiDuzelt() }
+        }
+        tuval.addGestureRecognizer(durak)
         NSLayoutConstraint.activate([
             tuval.topAnchor.constraint(equalTo: topAnchor), tuval.bottomAnchor.constraint(equalTo: bottomAnchor),
             tuval.leadingAnchor.constraint(equalTo: leadingAnchor), tuval.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -1087,6 +1117,8 @@ final class SayfaKatmani: UIView {
             r.ac = { [weak self] in self?.notAc?(n.id) }
             r.sil = { [weak self] in self?.notSil?(n.id) }
             r.tasindi = { [weak self] p in self?.notTasindi?(n.id, p) }
+            r.tasindiPencere = { [weak self] p, w in self?.notPencereyeBirakildi?(n.id, p, w) }
+            r.yenile = { [weak self] in self?.notlarYenile?() }
             addSubview(r)
             rozetler[n.id] = r
         }
@@ -1107,6 +1139,8 @@ final class NotRozeti: UIView, UIContextMenuInteractionDelegate {
     var ac: (() -> Void)?
     var sil: (() -> Void)?
     var tasindi: ((CGPoint) -> Void)?
+    var tasindiPencere: ((CGPoint, UIWindow) -> Void)?   // bırakılan nokta pencere koordinatında
+    var yenile: (() -> Void)?
     init(not: YapiskanNot) {
         super.init(frame: CGRect(x: 0, y: 0, width: 46, height: 46))
         backgroundColor = NotRenk.renk(not.renk)
@@ -1134,12 +1168,31 @@ final class NotRozeti: UIView, UIContextMenuInteractionDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc private func dokun() { ac?() }
+    /// Sürükleme sırasında rozet pencereye alınır: sayfa kenarında kesilmez, başka sayfanın üstüne kadar götürülebilir.
+    private var pencerede = false
+    private var pencereOlcegi: CGFloat = 1
     @objc private func surukle(_ g: UIPanGestureRecognizer) {
-        guard let ust = superview else { return }
-        let t = g.translation(in: ust)
-        center = CGPoint(x: min(max(center.x + t.x, 23), ust.bounds.width - 23), y: min(max(center.y + t.y, 23), ust.bounds.height - 23))
-        g.setTranslation(.zero, in: ust)
-        if g.state == .ended { tasindi?(center) }
+        switch g.state {
+        case .began:
+            guard let w = window, let ust = superview else { return }
+            let m = ust.convert(center, to: w)
+            pencereOlcegi = max(convert(CGRect(x: 0, y: 0, width: 1, height: 1), to: w).width, 0.2)
+            transform = CGAffineTransform(rotationAngle: -0.05).scaledBy(x: pencereOlcegi, y: pencereOlcegi)
+            w.addSubview(self); center = m; pencerede = true
+        case .changed:
+            guard pencerede, let w = window else { return }
+            let t = g.translation(in: w)
+            center = CGPoint(x: center.x + t.x, y: center.y + t.y)
+            g.setTranslation(.zero, in: w)
+        case .ended, .cancelled, .failed:
+            guard pencerede, let w = window else { return }
+            pencerede = false
+            let son = center
+            removeFromSuperview()
+            if g.state == .ended { tasindiPencere?(son, w) }
+            else { yenile?() }
+        default: break
+        }
     }
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in

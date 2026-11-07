@@ -8,7 +8,9 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
     var sil: (() -> Void)?
     private let yazi = UITextView()
     private let tuval = PKCanvasView()
-    private let palet = PKToolPicker()
+    private let kalem = KalemCubugu()      // sayfadakiyle aynı kendi kalem çubuğumuz (Apple'ın varsayılan paleti değil)
+    private var buyuk = false
+    private var buyutDugmesi: UIButton!
     private var renkDugmeleri: [UIButton] = []
 
     init(not: YapiskanNot) { self.not = not; super.init(nibName: nil, bundle: nil) }
@@ -42,7 +44,12 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
         }
         renkCerceve()
 
-        let ust = UIStackView(arrangedSubviews: [baslik, UIView(), renkler, silB, bittiB]); ust.spacing = 14; ust.alignment = .center
+        var bu = UIButton.Configuration.tinted(); bu.image = UIImage(systemName: "arrow.up.left.and.arrow.down.right"); bu.cornerStyle = .capsule
+        bu.baseForegroundColor = UIColor(white: 0.12, alpha: 1); bu.baseBackgroundColor = UIColor(white: 0.12, alpha: 1)
+        let buyutB = UIButton(configuration: bu, primaryAction: UIAction { [weak self] _ in self?.buyutDegistir() })
+        buyutB.accessibilityIdentifier = "notBuyut"; buyutB.accessibilityLabel = "Notu büyüt / küçült"
+        buyutDugmesi = buyutB
+        let ust = UIStackView(arrangedSubviews: [baslik, UIView(), renkler, buyutB, silB, bittiB]); ust.spacing = 14; ust.alignment = .center
 
         yazi.text = not.yazi
         yazi.font = .systemFont(ofSize: 19)
@@ -71,13 +78,35 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
             yigin.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -18),
             yazi.heightAnchor.constraint(equalToConstant: 110),
         ])
-        palet.addObserver(tuval)
+        kalem.sadeceCizim = true
+        kalem.aracDegisti = { [weak self] in self?.aracUygula() }
+        kalem.geriAl = { [weak self] in self?.tuval.undoManager?.undo() }
+        kalem.yinele = { [weak self] in self?.tuval.undoManager?.redo() }
+        kalem.cetvelDegisti = { [weak self] acik in self?.tuval.isRulerActive = acik }
+        kalem.parmakDegisti = { [weak self] acik in self?.tuval.drawingPolicy = (acik || Ayar.ornek) ? .anyInput : .pencilOnly }
+        kalem.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(kalem)
+        NSLayoutConstraint.activate([
+            kalem.topAnchor.constraint(equalTo: view.topAnchor), kalem.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            kalem.leadingAnchor.constraint(equalTo: view.leadingAnchor), kalem.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        aracUygula()
+    }
+    private func aracUygula() {
+        tuval.tool = kalem.pkArac
+        tuval.drawingGestureRecognizer.isEnabled = kalem.cizimAktif
+    }
+    /// Kalemle yazma alanını istenince büyütür: sayfa kâğıdı neredeyse tam ekran olur; yeniden basınca eski boyuna döner.
+    private func buyutDegistir() {
+        buyuk.toggle()
+        let alan = (presentingViewController?.view.bounds.size) ?? view.window?.bounds.size ?? CGSize(width: 900, height: 1200)
+        preferredContentSize = buyuk ? CGSize(width: max(alan.width - 40, 560), height: max(alan.height - 40, 620)) : CGSize(width: 560, height: 620)
+        buyutDugmesi.configuration?.image = UIImage(systemName: buyuk ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        palet.setVisible(true, forFirstResponder: tuval)
-        tuval.becomeFirstResponder()
+        aracUygula()
     }
 
     private func renkSec(_ ad: String) {
@@ -94,7 +123,6 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
         not.yazi = yazi.text ?? ""
         not.cizim = tuval.drawing.strokes.isEmpty ? nil : tuval.drawing.dataRepresentation()
         not.zaman = Zaman.simdi
-        palet.setVisible(false, forFirstResponder: tuval)
         let n = not, geriCagri = bitti
         bitti = nil
         dismiss(animated: true) { geriCagri?(n) }
