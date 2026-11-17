@@ -160,6 +160,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         pdfView.minScaleFactor = sigdir * 0.5
         pdfView.maxScaleFactor = sigdir * 5
         pdfView.scaleFactor = sigdir
+        sonSigdir = sigdir
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -173,6 +174,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             self.pdfView.minScaleFactor = sigdir * 0.5
             self.pdfView.maxScaleFactor = sigdir * 5
             self.pdfView.scaleFactor = sigdir * max(oran, 1)
+            self.sonSigdir = sigdir
             if let s = sayfa { self.pdfView.go(to: s) }
         }
     }
@@ -252,8 +254,28 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
             panelIlkKarar = true
             paneliDegistir(false, animasyon: false)
         }
+        // Yan yana bölmede genişlik değişir ama viewWillTransition çağrılmaz; sığdırma ölçeğini burada yeniden kur
+        let w = pdfView.bounds.width
+        if w > 0, abs(w - sonGenislik) > 1 {
+            let ilk = sonGenislik == 0
+            sonGenislik = w
+            if !ilk { genislikDegisti() }
+        }
     }
     private var panelIlkKarar = false
+    private var sonGenislik: CGFloat = 0
+    private var sonSigdir: CGFloat = 0
+    private func genislikDegisti() {
+        let sigdir = pdfView.scaleFactorForSizeToFit
+        guard sigdir > 0 else { return }
+        let oran = sonSigdir > 0 ? pdfView.scaleFactor / sonSigdir : 1
+        let sayfa = pdfView.currentPage
+        pdfView.minScaleFactor = sigdir * 0.5
+        pdfView.maxScaleFactor = sigdir * 5
+        pdfView.scaleFactor = sigdir * max(oran, 1)
+        sonSigdir = sigdir
+        if let s = sayfa { pdfView.go(to: s) }
+    }
 
     // MARK: PDF görünümü
     private func kurPdf() {

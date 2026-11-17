@@ -274,7 +274,11 @@ final class Tur5Sinavi: XCTestCase {
         }
         // araçlar
         if app.buttons["arac-gezin"].exists { app.buttons["arac-gezin"].tap(); sleep(1); cek("u9-gezin") }
-        if app.buttons["arac-resim"].exists { app.buttons["arac-resim"].tap(); sleep(1); cek("u10-resim-araci") }
+        if app.buttons["arac-resim"].exists {
+            app.buttons["arac-resim"].tap(); sleep(1); cek("u10-resim-araci")
+            // Görsel düğmesi (34173f4'ten beri) kendi menüsünü açar; açık kalırsa ekranın geri kalanını kilitler, kapat
+            if app.buttons["Galeriden seç"].exists { app.tap(); sleep(1) }
+        }
         // görsel ekle: sayfa menüsü → Görsel ekle → Galeriden seç, seçici açılmalı
         app.buttons["sayfaMenu"].tap(); sleep(1)
         let gorsel = app.buttons["Görsel ekle"]
@@ -346,7 +350,8 @@ final class Tur6Sinavi: XCTestCase {
         cek("v1-okuyucu-yatay-panel-kapali")
 
         // Şekil tanıma: eğri çizgi çiz, sonunda kalemi kaldırmadan bekle, kaldır → düz çizgi olmalı
-        let tuval = app.otherElements.matching(identifier: "tuval-b0").firstMatch
+        // Kimlik "tuval-<sayfa anahtarı>"; tür (other/scrollView) ve anahtar biçimi değişebilir
+        let tuval = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tuval-'")).firstMatch
         if tuval.waitForExistence(timeout: 5) {
             let a = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.55))
             let b = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.62))

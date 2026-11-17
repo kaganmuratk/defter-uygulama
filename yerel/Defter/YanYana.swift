@@ -15,10 +15,11 @@ struct BolunmusEkran: View {
             let anaBoy = ikinci == nil ? toplam : min(max(toplam * CGFloat(oran), enAz), max(toplam - enAz, enAz))
             let duzen = yanYana ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
             duzen {
-                ana.frame(width: yanYana ? anaBoy : nil, height: yanYana ? nil : anaBoy)
+                // .clipped(): daralan bölmenin içeriği komşu bölmenin altına taşmasın
+                ana.frame(width: yanYana ? anaBoy : nil, height: yanYana ? nil : anaBoy).clipped()
                 if let ikinci {
                     ayirici(toplam: toplam)
-                    ikinci
+                    ikinci.clipped()
                 }
             }
             .coordinateSpace(name: "bolme")
@@ -49,6 +50,8 @@ struct BolunmusEkran: View {
                 oran = Double(min(max(konum / max(toplam, 1), 0.2), 0.8))
             }
         )
+        // .contain: kapsayıcının kimliği içteki "bolmeYonu" düğmesinin kimliğini ezmesin
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bolmeAyirici")
         .zIndex(1)
     }
