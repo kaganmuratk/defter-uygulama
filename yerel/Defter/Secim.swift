@@ -315,10 +315,17 @@ final class SecimKontrol: NSObject {
     }
 
     // MARK: Şekil düzeltme (çizgi sonunda bekleyince)
-    func sonCizgiyiDuzelt() {
-        guard let k = katman, let son = k.tuval.drawing.strokes.last, Date().timeIntervalSince(son.path.creationDate) < 6 else { return }
-        guard let yeni = SekilTanima.duzelt(son) else { return }
-        degistir { d in d.strokes[d.strokes.count - 1] = yeni }
+    /// Kalem kalkınca çağrılır. PencilKit çizgiyi tuvale biraz gecikmeyle işleyebildiği için, çizgi görünene kadar
+    /// kısa aralıklarla bakılır; yalnız bu dokunuşla başlayan çizgi (başlangıç anı eşleşen) şekle çevrilir, öncekine dokunulmaz.
+    func sonCizgiyiDuzelt(baslangic: Date, deneme: Int = 0) {
+        guard let k = katman else { return }
+        if let son = k.tuval.drawing.strokes.last, abs(son.path.creationDate.timeIntervalSince(baslangic)) < 1.0 {
+            guard let yeni = SekilTanima.duzelt(son) else { return }
+            degistir { d in d.strokes[d.strokes.count - 1] = yeni }
+            return
+        }
+        guard deneme < 6 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.sonCizgiyiDuzelt(baslangic: baslangic, deneme: deneme + 1) }
     }
 
     // MARK: Geri alma

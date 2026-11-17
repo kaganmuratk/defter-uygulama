@@ -3,6 +3,8 @@ import PDFKit
 import WebKit
 import CryptoKit
 
+private final class BittiKutusu { var bitti = false }
+
 // Part metnini cihazda PDF'e basar: her bölüm bir sayfa (yüksekliği içeriğe göre), cevaplar ayrı sayfa.
 // Dizgi web sürümüyle aynı (800 px kâğıt, 21 px yazı) → eski web çizimleri birebir taşınabilir.
 // Sonuç part içeriğinin özetiyle önbelleğe alınır; içerik değişmedikçe yeniden basılmaz.
@@ -16,16 +18,64 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var yuklendi: CheckedContinuation<Void, Never>?
+    private var yuklemeNo = 0
     private var surecler: [String: Task<(PDFDocument, [SayfaBilgi])?, Never>] = [:]
+    // 2026-11-17 (kök neden, 9 Kas "loading'de takılıyor"): tek WebView + tek `yuklendi` var. Arka plan hazırlığı
+    // ile okuyucu aynı anda basarsa biri diğerinin bekleme kaydını eziyor, o part sonsuza dek bekliyordu.
+    // Çözüm: basımlar TEK SIRADA (zincir) yürür; her bekleme zaman aşımlı; takılırsa WebView sıfırlanıp bir kez yeniden denenir.
+    private var zincir: Task<Void, Never>?
 
     func belge(_ part: Part) async -> (PDFDocument, [SayfaBilgi])? {
         if part.id.hasPrefix("k-") { return KendiDepo.belge(part) }
         if let s = surecler[part.id] { return await s.value }
-        let t = Task { await self.uret(part) }
+        let onceki = zincir
+        let t = Task { () -> (PDFDocument, [SayfaBilgi])? in
+            await onceki?.value
+            if let r = await self.uret(part) { return r }
+            Tani.yaz("PDF basımı başarısız, WebView sıfırlanıp yeniden deneniyor", part.id)
+            self.sifirla()
+            return await self.uret(part)
+        }
+        zincir = Task { _ = await t.value }
         surecler[part.id] = t
         let r = await t.value
         surecler[part.id] = nil
         return r
+    }
+
+    /// Takılan WebView'ı atar; bir sonraki basım yenisini kurar
+    private func sifirla() {
+        yuklendi?.resume(); yuklendi = nil
+        webView?.stopLoading(); webView?.removeFromSuperview(); webView = nil
+    }
+
+    /// İşi zaman aşımıyla bekler (süre dolarsa nil). İş bitmese bile çağıran serbest kalır.
+    private func zamanli<T>(_ sn: Double, _ is_: @escaping @MainActor () async -> T?) async -> T? {
+        let k = BittiKutusu()
+        return await withCheckedContinuation { (c: CheckedContinuation<T?, Never>) in
+            Task { @MainActor in let r = await is_(); if !k.bitti { k.bitti = true; c.resume(returning: r) } }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(sn * 1_000_000_000))
+                if !k.bitti { k.bitti = true; c.resume(returning: nil) }
+            }
+        }
+    }
+
+    /// Sayfayı WebView'a yükler; 20 sn'de bitmezse false
+    private func sayfaYukle(_ web: WKWebView, _ dosya: URL) async -> Bool {
+        yuklemeNo += 1
+        let no = yuklemeNo
+        let tamam: Bool? = await zamanli(20) { [weak self] in
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                guard let self else { c.resume(); return }
+                self.yuklendi?.resume()        // eski bekleyen varsa serbest bırak (ezilmesin)
+                self.yuklendi = c
+                web.loadFileURL(dosya, allowingReadAccessTo: Depo.icerik)
+            }
+            return true
+        }
+        if tamam == nil, no == yuklemeNo { yuklendi?.resume(); yuklendi = nil }
+        return tamam == true
     }
 
     /// Önbelleği boş partların PDF'lerini sırayla, okuyucu kapalıyken hazırlar (açılış akıcı olsun).
@@ -68,10 +118,7 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
         for (baslik, govde, bilgi) in sayfalar {
             let dosya = Depo.icerik.appendingPathComponent("_sayfa.html")
             try? Self.html(baslik: baslik, govde: govde).write(to: dosya, atomically: true, encoding: .utf8)
-            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                yuklendi = c
-                web.loadFileURL(dosya, allowingReadAccessTo: Depo.icerik)
-            }
+            guard await sayfaYukle(web, dosya) else { Tani.yaz("sayfa yüklemesi zaman aşımı", "\(part.id) \(bilgi.anahtar)"); return nil }
             let js = #"""
             await document.fonts.ready;
             await Promise.all([...document.images].map(async g => {
@@ -112,7 +159,8 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
             return JSON.stringify({ alt: Math.ceil(kok.getBoundingClientRect().bottom), atiflar, hedefler });
             """#
             struct Olcum: Decodable { var alt: Double; var atiflar: [Atif]; var hedefler: [String: Double] }
-            let ham = (try? await web.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)) as? String
+            let ham: String? = await zamanli(25) { (try? await web.callAsyncJavaScript(js, arguments: [:], in: nil, contentWorld: .page)) as? String }
+            guard ham != nil else { Tani.yaz("sayfa ölçümü zaman aşımı", "\(part.id) \(bilgi.anahtar)"); return nil }
             let olcum = ham.flatMap { try? JSONDecoder().decode(Olcum.self, from: Data($0.utf8)) }
             let alt = olcum?.alt ?? 1000
             var bilgi = bilgi
@@ -121,8 +169,10 @@ final class PdfUretici: NSObject, WKNavigationDelegate {
             web.frame = CGRect(x: web.frame.origin.x, y: 0, width: Self.sayfaGenislik, height: yukseklik)
             let cfg = WKPDFConfiguration()
             cfg.rect = CGRect(x: 0, y: 0, width: Self.sayfaGenislik, height: yukseklik)
-            let veri: Data? = await withCheckedContinuation { c in
-                web.createPDF(configuration: cfg) { r in c.resume(returning: try? r.get()) }
+            let veri: Data? = await zamanli(25) {
+                await withCheckedContinuation { (c: CheckedContinuation<Data?, Never>) in
+                    web.createPDF(configuration: cfg) { r in c.resume(returning: try? r.get()) }
+                }
             }
             guard let v = veri, let tek = PDFDocument(data: v), let sayfa = tek.page(at: 0) else {
                 Tani.yaz("PDF sayfası basılamadı", "\(part.id) \(bilgi.anahtar)"); continue

@@ -2,7 +2,7 @@ import UIKit
 import PencilKit
 
 // Yapışkan notun açık hâli: üstte klavyeyle yazı, altında kalemle yazılabilen alan; renk seçimi, silme.
-final class NotEditoru: UIViewController, UITextViewDelegate {
+final class NotEditoru: UIViewController, UITextViewDelegate, PKCanvasViewDelegate {
     private var not: YapiskanNot
     var bitti: ((YapiskanNot) -> Void)?
     var sil: (() -> Void)?
@@ -14,6 +14,10 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
     private var renkDugmeleri: [UIButton] = []
 
     init(not: YapiskanNot) { self.not = not; super.init(nibName: nil, bundle: nil) }
+    /// Varsayılan boy (Kağan 2026-11-17: "daha büyük olsun"): ekranın ~%75'i, en az eski boy
+    static func varsayilanBoy(_ alan: CGSize) -> CGSize {
+        CGSize(width: min(max(alan.width * 0.72, 620), 900), height: min(max(alan.height * 0.78, 700), 1000))
+    }
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidLoad() {
@@ -29,8 +33,17 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
         })
         silB.tintColor = .systemRed
         var bc = UIButton.Configuration.filled(); bc.title = "Bitti"; bc.cornerStyle = .capsule; bc.baseBackgroundColor = UIColor(white: 0.12, alpha: 1)
+        bc.titleLineBreakMode = .byClipping
         let bittiB = UIButton(configuration: bc, primaryAction: UIAction { [weak self] _ in self?.kapat() })
         bittiB.accessibilityIdentifier = "notBitti"
+        // 2026-11-17 Kağan: "Bitti" dar satırda "Bit / ti" diye alt alta bölünüyordu → düğmeler sıkışmaz, gerekirse başlık kısalır
+        baslik.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        baslik.lineBreakMode = .byTruncatingTail
+        for b in [silB, bittiB] {
+            b.titleLabel?.numberOfLines = 1
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            b.setContentHuggingPriority(.required, for: .horizontal)
+        }
 
         let renkler = UIStackView(); renkler.spacing = 8
         for (ad, _) in NotRenk.secenekler {
@@ -67,6 +80,11 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
         tuval.drawingPolicy = Ayar.ornek ? .anyInput : .pencilOnly
         if let d = not.cizim, let c = try? PKDrawing(data: d) { tuval.drawing = c }
         tuval.tool = PKInkingTool(.pen, color: UIColor(white: 0.1, alpha: 1), width: 3)
+        // Yazma alanı aşağı doğru uzar (Kağan 2026-11-17: "istediğimde daha uzayabiliyor olsun"): alt kenara yaklaşınca yer açılır, parmakla kaydırılır
+        tuval.delegate = self
+        tuval.isScrollEnabled = true
+        tuval.alwaysBounceVertical = true
+        tuval.scrollsToTop = false
 
         let yigin = UIStackView(arrangedSubviews: [ust, yazi, ipucu, tuval]); yigin.axis = .vertical; yigin.spacing = 10
         yigin.translatesAutoresizingMaskIntoConstraints = false
@@ -75,10 +93,11 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
             yigin.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
             yigin.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             yigin.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
-            yigin.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -18),
+            yigin.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -84),   // altta kalem çubuğuna yer
             yazi.heightAnchor.constraint(equalToConstant: 110),
         ])
         kalem.sadeceCizim = true
+        kalem.sabitKonum = .alt     // notun kendi üst satırıyla (renk/büyüt/sil/bitti) çakışmasın: çubuk hep altta, tek panel
         kalem.aracDegisti = { [weak self] in self?.aracUygula() }
         kalem.geriAl = { [weak self] in self?.tuval.undoManager?.undo() }
         kalem.yinele = { [weak self] in self?.tuval.undoManager?.redo() }
@@ -92,6 +111,20 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
         ])
         aracUygula()
     }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        alaniUzat()
+    }
+    func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) { alaniUzat() }
+    private func alaniUzat() {
+        let w = tuval.bounds.width, gorunen = tuval.bounds.height
+        guard w > 0 else { return }
+        let alt = tuval.drawing.strokes.isEmpty ? 0 : tuval.drawing.bounds.maxY
+        let hedef = max(gorunen, alt + max(gorunen * 0.6, 300))
+        if abs(tuval.contentSize.width - w) > 1 || tuval.contentSize.height < hedef - 1 {
+            tuval.contentSize = CGSize(width: w, height: max(hedef, tuval.contentSize.height))
+        }
+    }
     private func aracUygula() {
         tuval.tool = kalem.pkArac
         tuval.drawingGestureRecognizer.isEnabled = kalem.cizimAktif
@@ -100,7 +133,7 @@ final class NotEditoru: UIViewController, UITextViewDelegate {
     private func buyutDegistir() {
         buyuk.toggle()
         let alan = (presentingViewController?.view.bounds.size) ?? view.window?.bounds.size ?? CGSize(width: 900, height: 1200)
-        preferredContentSize = buyuk ? CGSize(width: max(alan.width - 40, 560), height: max(alan.height - 40, 620)) : CGSize(width: 560, height: 620)
+        preferredContentSize = buyuk ? CGSize(width: max(alan.width - 40, 560), height: max(alan.height - 40, 620)) : NotEditoru.varsayilanBoy(alan)
         buyutDugmesi.configuration?.image = UIImage(systemName: buyuk ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
     }
 

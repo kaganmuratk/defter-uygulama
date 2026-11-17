@@ -15,6 +15,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     var kapat: (() -> Void)?
     var atla: ((String, String) -> Void)?      // (partId, hedef): başka part'taki şekle/tabloya geç
     var acilisHedefi: String?                  // açılır açılmaz gidilecek şekil/tablo adı
+    var yanYana: (() -> Void)?                 // "Yan yana aç": ikinci bir sayfa/kitap seçtirir (yalnız ana okuyucuda)
+    var ikinciBolme = false                    // yan yana görünümün ikinci bölmesi: "Geri" yerine "Kapat"
 
     private let pdfView = PDFView()
     private let ustCubuk = UIView()
@@ -78,12 +80,19 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         kalem.delegate = self
         view.addInteraction(kalem)
         kurKalemCubugu()
-        Senkron.ortak.acikPart = part.id
+        Senkron.ortak.acikPartlar.insert(part.id)
     }
 
     private var yukleBasladi = false
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // Bölme kapatılınca (yan yana görünüm) ya da ekran gidince: değişiklik kaybolmasın, part "açık" sayılmasın
+        if kirli { kaydet(sessiz: true) }
+        Senkron.ortak.acikPartlar.remove(part.id)
+    }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        Senkron.ortak.acikPartlar.insert(part.id)
         paletiGoster(paletAcik)
         // Part'ı açarken kayma animasyonu akıcı olsun diye PDF yükleme animasyon bittikten sonra başlar
         if !yukleBasladi { yukleBasladi = true; Task { try? await Task.sleep(nanoseconds: 120_000_000); await yukle() } }
@@ -96,8 +105,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         else { kayit = Ayar.ornek ? PartKaydi() : Depo.partKaydi(part.id); kirli = false }
         guard let uretilen = await PdfUretici.ortak.belge(part) else {
             yukleniyor.stopAnimating()
-            let e = UILabel(); e.text = "Sayfalar hazırlanamadı."; e.textColor = .secondaryLabel
-            e.frame = view.bounds; e.textAlignment = .center; view.addSubview(e)
+            hataGoster()
             return
         }
         let (doc, bilgi) = uretilen
@@ -107,12 +115,36 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         for ek in kayit.ekSayfalar { ekSayfaYerlestir(ek, belge: doc) }
         if kendiPart { sayfaDuzeniniUygula(doc) }
         pdfView.document = doc
+        // 2026-11-17 Kağan: "sayfa içindeyken birden ilk sayfaya gidiyor". En güçlü aday: ekranın en üst kenarına
+        // (durum çubuğu bölgesine) değen el, iOS'un "en başa kaydır" (scrollsToTop) davranışını tetikliyor. Kapatıldı.
+        pdfKaydirma?.scrollsToTop = false
         yukleniyor.stopAnimating()
         paneliGuncelle()
         DispatchQueue.main.async { [weak self] in self?.olcekleriAyarla(); self?.kaldigiYereGit() }
     }
 
+    /// Basım başarısız olursa (zaman aşımı vb.) sonsuz yükleme yerine "Tekrar dene"
+    private var hataKutusu: UIView?
+    private func hataGoster() {
+        let e = UILabel(); e.text = "Sayfalar hazırlanamadı."; e.textColor = .secondaryLabel; e.font = Tema.uiArayuz(16, 600)
+        var c = UIButton.Configuration.filled(); c.title = "Tekrar dene"; c.cornerStyle = .capsule
+        c.baseBackgroundColor = Tema.dolguUI; c.baseForegroundColor = Tema.dolguUstuUI
+        let b = UIButton(configuration: c, primaryAction: UIAction { [weak self] _ in
+            guard let self else { return }
+            self.hataKutusu?.removeFromSuperview(); self.hataKutusu = nil
+            self.yukleniyor.startAnimating()
+            Task { await self.yukle() }
+        })
+        b.accessibilityIdentifier = "tekrarDene"
+        let y = UIStackView(arrangedSubviews: [e, b]); y.axis = .vertical; y.spacing = 14; y.alignment = .center
+        y.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(y)
+        NSLayoutConstraint.activate([y.centerXAnchor.constraint(equalTo: pdfView.centerXAnchor), y.centerYAnchor.constraint(equalTo: pdfView.centerYAnchor)])
+        hataKutusu = y
+    }
+
     private func kaldigiYereGit() {
+        bilerekGitti()
         if let h = acilisHedefi { acilisHedefi = nil; if hedefeGit(h) { return } }
         // Önce "Burada kaldım" sayfası (işaret duruyorsa), yoksa en son çıkılan sayfa
         let isaretli = durum == "yarim" ? Konum.kaldim(part.id) : nil
@@ -198,7 +230,12 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         panel.satirlar = satirlar
         panel.notlar = kayit.notlar
     }
+    /// Uygulamanın kendi gezintisi (kullanıcı düğmesi/atıf/açılış): beklenmedik "ilk sayfaya atlama" tanısından ayırmak için
+    private var sonBilerekGitme = Date.distantPast
+    private func bilerekGitti() { sonBilerekGitme = Date() }
+    private var oncekiSayfaIndeksi = -1
     private func sayfayaGit(_ anahtar: String) {
+        bilerekGitti()
         guard let doc = pdfView.document else { return }
         for i in 0..<doc.pageCount { if let p = doc.page(at: i), anahtarlar[ObjectIdentifier(p)] == anahtar { pdfView.go(to: p); return } }
     }
@@ -210,10 +247,10 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     private var anlikAnahtar: String? { pdfView.currentPage.flatMap { anahtarlar[ObjectIdentifier($0)] } }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // İlk yerleşimde: geniş ekranda (yatay iPad) panel açık gelir
+        // İlk yerleşimde panel KAPALI gelir (Kağan 2026-11-17: "notu her açtığımda yan panel otomatik açılmasın"); yalnız düğmeyle açılır
         if !panelIlkKarar, view.bounds.width > 0 {
             panelIlkKarar = true
-            paneliDegistir(view.bounds.width > 1000, animasyon: false)
+            paneliDegistir(false, animasyon: false)
         }
     }
     private var panelIlkKarar = false
@@ -263,6 +300,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if let k = katmanlar[anahtar] { return k }
         let k = SayfaKatmani(anahtar: anahtar, sayfaBoyu: page.bounds(for: .mediaBox).size)
         k.tuval.delegate = self
+        k.tuval.scrollsToTop = false
         k.tuval.drawingPolicy = (Ayar.ornek || kalemCubugu.parmakla) ? .anyInput : .pencilOnly
         k.tuval.tool = kalemCubugu.pkArac
         k.tuval.isRulerActive = kalemCubugu.cetvel
@@ -436,6 +474,11 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     // MARK: İlerleme
     @objc private func sayfaDegisti() {
         guard let p = pdfView.currentPage, let anahtar = anahtarlar[ObjectIdentifier(p)] else { return }
+        let indeks = pdfView.document?.index(for: p) ?? -1
+        if indeks == 0, oncekiSayfaIndeksi >= 2, Date().timeIntervalSince(sonBilerekGitme) > 1.5 {
+            Tani.yaz("beklenmedik ilk sayfaya atlama", "\(part.id) önceki=\(oncekiSayfaIndeksi) araç=\(kalemCubugu.arac.rawValue)")
+        }
+        oncekiSayfaIndeksi = indeks
         panel.secili = anahtar
         Konum.sonYaz(part.id, anahtar)      // part'tan çıkınca tekrar girince bu sayfaya dönülür
         kaldimDugmesiniGuncelle()
@@ -526,6 +569,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
     /// Bu part'ta varsa şekle/tabloya kaydırır.
     private func hedefeGit(_ ad: String) -> Bool {
+        bilerekGitti()
         guard let doc = pdfView.document else { return false }
         let adaylar = [ad, AtifIndeksi.temel(ad)]
         for (i, b) in sayfalar.enumerated() {
@@ -564,6 +608,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         try? FileManager.default.removeItem(at: Depo.taslakURL(part.id))
         kirli = false
     }
+    private func kirliyseKaydet() { if kirli { kaydet(sessiz: true) } }
     private func cik() { kirliyseSor { [weak self] in self?.kapat?() } }
     /// Kaydedilmemiş değişiklik varsa sorar; sonra `devam` çalışır (Pencil/palet temizliği dahil).
     private func kirliyseSor(_ devam: @escaping () -> Void) {
@@ -571,7 +616,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         temizle(); devam()
     }
     private func temizle() {
-        Senkron.ortak.acikPart = nil
+        Senkron.ortak.acikPartlar.remove(part.id)
     }
 
     // MARK: Ek sayfalar
@@ -789,7 +834,7 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         }
         ed.sil = { [weak self] in self?.notSil(id) }
         ed.modalPresentationStyle = .formSheet
-        ed.preferredContentSize = CGSize(width: 560, height: 620)
+        ed.preferredContentSize = NotEditoru.varsayilanBoy(view.window?.bounds.size ?? view.bounds.size)
         present(ed, animated: true)
     }
     private func notTasi(_ id: String, _ nokta: CGPoint) {
@@ -807,8 +852,8 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         if let sayfa = pdfView.page(for: pn, nearest: true), let anahtar = anahtarlar[ObjectIdentifier(sayfa)] {
             let pdfNokta = pdfView.convert(pn, to: sayfa), boy = sayfa.bounds(for: .mediaBox)
             kayit.notlar[i].sayfa = anahtar
-            kayit.notlar[i].x = Double(min(max(pdfNokta.x, 23), boy.width - 23))
-            kayit.notlar[i].y = Double(min(max(boy.height - pdfNokta.y, 23), boy.height - 23))
+            kayit.notlar[i].x = Double(min(max(pdfNokta.x, 28), boy.width - 28))
+            kayit.notlar[i].y = Double(min(max(boy.height - pdfNokta.y, 28), boy.height - 28))
             kirli = true; taslakPlanla()
         }
         notlariTazele()
@@ -839,9 +884,9 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         let cizgi = UIView(); cizgi.backgroundColor = .clear; cizgi.translatesAutoresizingMaskIntoConstraints = false
         ustCubuk.addSubview(cizgi)
 
-        let geri = ustDugme("Geri", sembol: "chevron.left") { [weak self] in self?.cik() }
-        geri.accessibilityIdentifier = "geri"
-        geri.toolTip = "Kütüphaneye dön"
+        let geri = ustDugme(ikinciBolme ? "Kapat" : "Geri", sembol: ikinciBolme ? "xmark" : "chevron.left") { [weak self] in self?.cik() }
+        geri.accessibilityIdentifier = ikinciBolme ? "bolmeKapat" : "geri"
+        geri.toolTip = ikinciBolme ? "Bu bölmeyi kapat" : "Kütüphaneye dön"
         baslikEtiket.text = part.id.hasPrefix("k-") ? part.baslik : "Part \(part.no) · \(part.baslik)"
         baslikEtiket.font = Tema.uiBaslik(17, 600)
         baslikEtiket.textColor = Tema.murekkepUI
@@ -864,11 +909,22 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         sayfaMenu.accessibilityLabel = "Sayfa ekle ve düzenle"
         sayfaMenu.widthAnchor.constraint(equalToConstant: 42).isActive = true
         sayfaMenu.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        // Kağan 2026-11-17: menünün en üstünde şu an açık sayfanın türü (aynısından bir tane daha eklemek tek dokunuş)
+        let turler = UIDeferredMenuElement.uncached { [weak self] tamam in
+            let tum: [(BosSayfa.Desen, String, String)] = [
+                (.cizgili, "Çizgili sayfa ekle", "line.3.horizontal"), (.kareli, "Kareli sayfa ekle", "squareshape.split.3x3"),
+                (.noktali, "Noktalı sayfa ekle", "circle.grid.3x3"), (.duz, "Düz sayfa ekle", "doc"),
+            ]
+            let su = (self?.pdfView.currentPage as? BosSayfa)?.desen
+            let sirali = tum.filter { $0.0 == su } + tum.filter { $0.0 != su }
+            var ogeler: [UIMenuElement] = sirali.map { t in
+                UIAction(title: t.0 == su ? t.1.replacingOccurrences(of: " ekle", with: " ekle (bu sayfa gibi)") : t.1, image: UIImage(systemName: t.2)) { [weak self] _ in self?.sayfaEkle(t.0) }
+            }
+            if su != nil, ogeler.count > 1 { ogeler = [UIMenu(options: .displayInline, children: [ogeler[0]])] + Array(ogeler.dropFirst()) }
+            tamam(ogeler)
+        }
         sayfaMenu.menu = UIMenu(title: "Sayfa", children: [
-            UIAction(title: "Çizgili sayfa ekle", image: UIImage(systemName: "line.3.horizontal")) { [weak self] _ in self?.sayfaEkle(.cizgili) },
-            UIAction(title: "Kareli sayfa ekle", image: UIImage(systemName: "squareshape.split.3x3")) { [weak self] _ in self?.sayfaEkle(.kareli) },
-            UIAction(title: "Noktalı sayfa ekle", image: UIImage(systemName: "circle.grid.3x3")) { [weak self] _ in self?.sayfaEkle(.noktali) },
-            UIAction(title: "Düz sayfa ekle", image: UIImage(systemName: "doc")) { [weak self] _ in self?.sayfaEkle(.duz) },
+            turler,
             UIMenu(title: "Görsel ekle", image: UIImage(systemName: "photo.badge.plus"), children: [
                 UIAction(title: "Galeriden seç", image: UIImage(systemName: "photo.on.rectangle")) { [weak self] _ in self?.galeriAc() },
                 UIAction(title: "Fotoğraf çek", image: UIImage(systemName: "camera")) { [weak self] _ in self?.kameraAc() },
@@ -882,7 +938,13 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
 
         kirli = false
 
-        let sol = UIStackView(arrangedSubviews: [geri, panelDugme]); sol.spacing = 6; sol.alignment = .center
+        var solDugmeler: [UIView] = [geri, panelDugme]
+        if yanYana != nil {
+            let y = ikonDugme("rectangle.split.2x1", ad: "Yan yana aç") { [weak self] in self?.kirliyseKaydet(); self?.yanYana?() }
+            y.accessibilityIdentifier = "yanYana"
+            solDugmeler.append(y)
+        }
+        let sol = UIStackView(arrangedSubviews: solDugmeler); sol.spacing = 6; sol.alignment = .center
         // Kendi kitaplarda "Burada kaldım" ve "bitti" yok (yalnız hazır kitaplarda)
         let sagDugmeler: [UIView] = kendiPart ? [sayfaMenu, not, kalem, kaydetDugmesi] : [kaldimDugmesi, sayfaMenu, not, kalem, kaydetDugmesi]
         let sag = UIStackView(arrangedSubviews: sagDugmeler); sag.spacing = 6; sag.alignment = .center
@@ -1014,9 +1076,9 @@ final class SayfaKatmani: UIView {
         addGestureRecognizer(resimIptal)
         clipsToBounds = false                    // sürüklenen seçim sayfa kenarında kesilmesin
         let durak = DurakGozcusu(target: nil, action: nil)
-        durak.durdu = { [weak self] in
+        durak.durdu = { [weak self] bas in
             guard let self, self.tuval.tool is PKInkingTool else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.secim.sonCizgiyiDuzelt() }
+            self.secim.sonCizgiyiDuzelt(baslangic: bas)
         }
         tuval.addGestureRecognizer(durak)
         NSLayoutConstraint.activate([
@@ -1142,7 +1204,7 @@ final class NotRozeti: UIView, UIContextMenuInteractionDelegate {
     var tasindiPencere: ((CGPoint, UIWindow) -> Void)?   // bırakılan nokta pencere koordinatında
     var yenile: (() -> Void)?
     init(not: YapiskanNot) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 46, height: 46))
+        super.init(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
         backgroundColor = NotRenk.renk(not.renk)
         layer.cornerRadius = 6
         layer.shadowColor = UIColor.black.cgColor
@@ -1150,12 +1212,12 @@ final class NotRozeti: UIView, UIContextMenuInteractionDelegate {
         transform = CGAffineTransform(rotationAngle: -0.05)
         let ikon = UIImageView(image: UIImage(systemName: (not.yazi.isEmpty && not.cizim == nil) ? "square.and.pencil" : "text.alignleft"))
         ikon.tintColor = UIColor(white: 0.15, alpha: 0.75)
-        ikon.frame = bounds.insetBy(dx: 12, dy: 12)
+        ikon.frame = bounds.insetBy(dx: 14, dy: 14)
         ikon.contentMode = .scaleAspectFit
         addSubview(ikon)
         // Katlanmış köşe
         let kose = CAShapeLayer()
-        let yol = UIBezierPath(); yol.move(to: CGPoint(x: 34, y: 46)); yol.addLine(to: CGPoint(x: 46, y: 34)); yol.addLine(to: CGPoint(x: 34, y: 34)); yol.close()
+        let yol = UIBezierPath(); yol.move(to: CGPoint(x: 42, y: 56)); yol.addLine(to: CGPoint(x: 56, y: 42)); yol.addLine(to: CGPoint(x: 42, y: 42)); yol.close()
         kose.path = yol.cgPath; kose.fillColor = UIColor(white: 0, alpha: 0.12).cgColor
         layer.addSublayer(kose)
         accessibilityIdentifier = "not-rozeti"
@@ -1278,11 +1340,15 @@ struct OkuyucuEkrani: UIViewControllerRepresentable {
     let kapat: () -> Void
     var atla: ((String, String) -> Void)? = nil
     var hedef: String? = nil
+    var yanYana: (() -> Void)? = nil
+    var ikinciBolme = false
     func makeUIViewController(context: Context) -> OkuyucuKontrol {
         let k = OkuyucuKontrol(partOzet: partOzet, part: part)
         k.kapat = kapat
         k.atla = atla
         k.acilisHedefi = hedef
+        k.yanYana = yanYana
+        k.ikinciBolme = ikinciBolme
         return k
     }
     func updateUIViewController(_ uiViewController: OkuyucuKontrol, context: Context) {}

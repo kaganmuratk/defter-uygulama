@@ -43,7 +43,15 @@ final class KalemCubugu: UIView {
     private(set) var parmakla = false
     private(set) var silgiVektor = false
     private(set) var silgiBoyu: CGFloat = 22
-    private(set) var konum: Konum = Konum(rawValue: UserDefaults.standard.string(forKey: "kalemKonum") ?? "") ?? .alt
+    // Kağan 2026-11-17: çubuk yalnız 4 yere (üst/alt/sol/sağ kenarın ortası) gider; eski köşe kayıtları en yakın kenara çevrilir
+    private(set) var konum: Konum = {
+        switch Konum(rawValue: UserDefaults.standard.string(forKey: "kalemKonum") ?? "") ?? .alt {
+        case .ust, .solUst, .sagUst: return .ust
+        case .sol: return .sol
+        case .sag: return .sag
+        default: return .alt
+        }
+    }()
     private let silgiModu = UISegmentedControl(items: ["Parça sil", "Çizgiyi sil"])
     private var renkSira: [Arac: Int] = [.kalem: 0, .fosforlu: 0]
     private var ozel: [Arac: String] = [:]             // renk seçiciden seçilen özel renk (hex)
@@ -57,7 +65,7 @@ final class KalemCubugu: UIView {
     private var kalinlik: [Arac: CGFloat] = [.kalem: 3, .fosforlu: 18]
     private let kalinlikAraligi: [Arac: ClosedRange<Float>] = [.kalem: 1...14, .fosforlu: 8...44]
 
-    private let govde = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let govde = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
     private var aracDugmeleri: [Arac: UIButton] = [:]
     private let renkDaire = UIButton(type: .custom)
     private let menuDugmesi = UIButton(type: .system)
@@ -84,6 +92,14 @@ final class KalemCubugu: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Yapışkan not düzenleyicisinde yalnız kalem, fosforlu ve silgi görünür (seç/yazı/gezin/görsel sayfa içindir)
+    /// Not editörü gibi küçük ekranlarda: çubuk bu konumda sabit durur, taşınmaz (tutamaç gizli), sayfanın konum ayarını değiştirmez
+    var sabitKonum: Konum? {
+        didSet {
+            guard let k = sabitKonum else { return }
+            konum = k; tutamac.isHidden = true
+            eksenUygula(); setNeedsLayout()
+        }
+    }
     var sadeceCizim = false {
         didSet { for a in [Arac.sec, .metin, .gezin, .resim] { aracDugmeleri[a]?.isHidden = sadeceCizim } }
     }
@@ -116,9 +132,9 @@ final class KalemCubugu: UIView {
             }
         }
         govde.layer.cornerRadius = 28; govde.layer.cornerCurve = .continuous; govde.clipsToBounds = true; govde.layer.borderWidth = 1
-        govde.contentView.backgroundColor = Tema.camDolguUI
+        govde.contentView.backgroundColor = Tema.cubukDolguUI
         ayarPaneli.layer.cornerRadius = 24; ayarPaneli.layer.cornerCurve = .continuous; ayarPaneli.clipsToBounds = true; ayarPaneli.layer.borderWidth = 1
-        ayarPaneli.contentView.backgroundColor = Tema.camDolguUI
+        ayarPaneli.contentView.backgroundColor = Tema.cubukDolguUI
         ayarPaneli.isHidden = true
         addSubview(govde); addSubview(ayarPaneli)
 
@@ -315,21 +331,12 @@ final class KalemCubugu: UIView {
             let t = g.translation(in: self)
             govde.center = CGPoint(x: surukleBaslangic.x + t.x, y: surukleBaslangic.y + t.y)
         case .ended, .cancelled, .failed:
+            guard sabitKonum == nil else { suruklemede = false; setNeedsLayout(); return }
+            // Bırakılan yere en yakın kenar (oransal uzaklık): yalnız üst, alt, sol, sağ
             let c = govde.center
-            let kolon = c.x < bounds.width / 3 ? 0 : (c.x > bounds.width * 2 / 3 ? 2 : 1)
-            let satir = c.y < bounds.height / 3 ? 0 : (c.y > bounds.height * 2 / 3 ? 2 : 1)
-            let yeni: Konum
-            switch (kolon, satir) {
-            case (0, 0): yeni = .solUst
-            case (1, 0): yeni = .ust
-            case (2, 0): yeni = .sagUst
-            case (0, 1): yeni = .sol
-            case (2, 1): yeni = .sag
-            case (0, 2): yeni = .solAlt
-            case (1, 2): yeni = .alt
-            case (2, 2): yeni = .sagAlt
-            default: yeni = konum
-            }
+            let w = max(bounds.width, 1), h = max(bounds.height, 1)
+            let uzaklik: [(Konum, CGFloat)] = [(.ust, c.y / h), (.alt, (h - c.y) / h), (.sol, c.x / w), (.sag, (w - c.x) / w)]
+            let yeni = uzaklik.min { $0.1 < $1.1 }?.0 ?? konum
             konum = yeni
             UserDefaults.standard.set(yeni.rawValue, forKey: "kalemKonum")
             eksenUygula()

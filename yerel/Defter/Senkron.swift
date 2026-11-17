@@ -21,7 +21,9 @@ final class Senkron: ObservableObject {
         get { UserDefaults.standard.bool(forKey: "ilerlemeKirli") }
         set { UserDefaults.standard.set(newValue, forKey: "ilerlemeKirli") }
     }
-    var acikPart: String?   // açık okuyucudaki part: taslağı varken sunucudan gelen sürüm üzerine yazılmaz
+    /// Açık okuyuculardaki partlar (yan yana görünümde iki tane olabilir): sunucudan gelen sürüm bunların üzerine yazılmaz
+    var acikPartlar: Set<String> = []
+    var acikPart: String? { acikPartlar.first }
 
     func planla() {
         ilerlemeKirli = true
@@ -59,7 +61,7 @@ final class Senkron: ObservableObject {
             // Diğer cihazdan gelen yerel kayıtlar
             for (anahtar, deger) in cizim where anahtar.hasSuffix("#yerel") {
                 let partId = String(anahtar.dropLast("#yerel".count))
-                guard partId != acikPart, !kirliPartlar.contains(partId),
+                guard !acikPartlar.contains(partId), !kirliPartlar.contains(partId),
                       let liste = (deger as? [String: Any])?["kaydedilen"] as? [[String: Any]],
                       let oge = liste.first(where: { ($0["id"] as? String) == "yerel" }),
                       let b64 = oge["veri"] as? String, let veri = Data(base64Encoded: b64),

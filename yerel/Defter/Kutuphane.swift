@@ -91,6 +91,8 @@ struct GeriDugmesi: View {
 struct KutuphaneEkrani: View {
     @EnvironmentObject var icerik: IcerikYonetici
     @State private var acikPart: (PartOzet, Part)?
+    @State private var ikinciPart: (PartOzet, Part)?     // yan yana görünümün ikinci bölmesi
+    @State private var seciciAcik = false
     @State private var acikHedef: String?
     @State private var ayarAcik = false
     @State private var adIstegi: AdIstegi?
@@ -130,12 +132,23 @@ struct KutuphaneEkrani: View {
         .fileImporter(isPresented: $pdfSec, allowedContentTypes: [.pdf], onCompletion: pdfAl)
         .fullScreenCover(isPresented: Binding(get: { acikPart != nil }, set: { if !$0 { acikPart = nil } })) {
             if let acik = acikPart {
-                OkuyucuEkrani(partOzet: acik.0, part: acik.1, kapat: { acikPart = nil; acikHedef = nil },
-                              atla: { id, hedef in
-                                  guard let o = partOzet(id), let p = icerik.part(id) else { return }
-                                  acikHedef = hedef; acikPart = (o, p)
-                              }, hedef: acikHedef)
-                    .id(acik.1.id).ignoresSafeArea(.container, edges: .bottom)
+                BolunmusEkran(
+                    ana: AnyView(OkuyucuEkrani(partOzet: acik.0, part: acik.1, kapat: { acikPart = nil; acikHedef = nil; ikinciPart = nil },
+                                               atla: { id, hedef in
+                                                   guard let o = partOzet(id), let p = icerik.part(id) else { return }
+                                                   acikHedef = hedef; acikPart = (o, p)
+                                               }, hedef: acikHedef, yanYana: { seciciAcik = true })
+                        .id(acik.1.id)),
+                    ikinci: ikinciPart.map { i in
+                        AnyView(OkuyucuEkrani(partOzet: i.0, part: i.1, kapat: { ikinciPart = nil }, ikinciBolme: true).id("2-" + i.1.id))
+                    })
+                .ignoresSafeArea(.container, edges: .bottom)
+                .sheet(isPresented: $seciciAcik) {
+                    YanYanaSecici(icerik: icerik, haric: [acik.1.id] + (ikinciPart.map { [$0.1.id] } ?? [])) { o in
+                        if let p = icerik.part(o.id) { ikinciPart = (o, p) }
+                        seciciAcik = false
+                    }
+                }
             }
         }
     }

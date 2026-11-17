@@ -315,3 +315,81 @@ extension XCUIElement {
         typeText(metin)
     }
 }
+
+// Tur 6 (2026-11-17): yan panel kapalı başlar, şekil tanıma (bekle-kaldır), yan yana görünüm, büyük not editörü, sayfa menüsü
+final class Tur6Sinavi: XCTestCase {
+    var app: XCUIApplication!
+    override func setUp() {
+        continueAfterFailure = true
+        app = XCUIApplication()
+        app.launchArguments = ["-ornek", "-tema", "acik"]
+    }
+    private func cek(_ ad: String) {
+        let e = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); e.name = ad; e.lifetime = .keepAlways; add(e)
+    }
+    private func partAc() {
+        let kitap = app.buttons["kitap-fizyoloji"].firstMatch
+        XCTAssertTrue(kitap.waitForExistence(timeout: 15))
+        kitap.tap()
+        if !app.buttons["bolum-1"].waitForExistence(timeout: 3) { kitap.tap() }
+        XCTAssertTrue(app.buttons["bolum-1"].waitForExistence(timeout: 5))
+        app.buttons["bolum-1"].tap()
+        XCTAssertTrue(app.buttons["part-01"].waitForExistence(timeout: 5))
+        app.buttons["part-01"].tap()
+        XCTAssertTrue(app.buttons["geri"].waitForExistence(timeout: 10))
+        sleep(6)
+    }
+    func testTur6() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launch()
+        partAc()
+        cek("v1-okuyucu-yatay-panel-kapali")
+
+        // Şekil tanıma: eğri çizgi çiz, sonunda kalemi kaldırmadan bekle, kaldır → düz çizgi olmalı
+        let tuval = app.otherElements.matching(identifier: "tuval-b0").firstMatch
+        if tuval.waitForExistence(timeout: 5) {
+            let a = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.55))
+            let b = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.62))
+            a.press(forDuration: 0.1, thenDragTo: b, withVelocity: .slow, thenHoldForDuration: 1.0)
+            sleep(2)
+            cek("v2-sekil-cizgi-duzeldi")
+            // bekleme YOK → olduğu gibi kalmalı
+            let c = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.72))
+            let d = tuval.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.80))
+            c.press(forDuration: 0.1, thenDragTo: d)
+            sleep(2)
+            cek("v3-beklemeden-cizgi")
+        }
+
+        // Sayfa menüsü
+        app.buttons["sayfaMenu"].tap(); sleep(1)
+        cek("v4-sayfa-menusu")
+        app.tap(); sleep(1)
+        if app.buttons["Çizgili sayfa ekle"].exists { app.buttons["Çizgili sayfa ekle"].tap(); sleep(2) }
+
+        // Not editörü (büyük, tek kalem çubuğu, "Bitti" bölünmemeli)
+        app.buttons["notEkle"].tap(); sleep(2)
+        cek("v5-not-editoru")
+        if app.buttons["notBitti"].waitForExistence(timeout: 3) { app.buttons["notBitti"].tap() }
+        sleep(1)
+
+        // Yan yana
+        XCTAssertTrue(app.buttons["yanYana"].waitForExistence(timeout: 5))
+        app.buttons["yanYana"].tap(); sleep(2)
+        cek("v6-yanyana-secici")
+        let secim = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'yanyana-'")).firstMatch
+        if secim.waitForExistence(timeout: 5) {
+            secim.tap(); sleep(7)
+            cek("v7-yanyana")
+            if app.buttons["bolmeYonu"].exists { app.buttons["bolmeYonu"].tap(); sleep(3); cek("v8-ustuste") }
+            let ayirici = app.otherElements["bolmeAyirici"]
+            if ayirici.exists {
+                let s = ayirici.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                s.press(forDuration: 0.2, thenDragTo: s.withOffset(CGVector(dx: 0, dy: -150)))
+                sleep(2); cek("v9-boyut-degisti")
+            }
+            if app.buttons["bolmeKapat"].exists { app.buttons["bolmeKapat"].tap(); sleep(2); cek("v10-bolme-kapandi") }
+        }
+        XCUIDevice.shared.orientation = .portrait
+    }
+}

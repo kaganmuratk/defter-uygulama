@@ -7,36 +7,75 @@ import UIKit.UIGestureRecognizerSubclass
 
 /// Kalemin çizgi sonunda hareketsiz kalıp kalmadığını izler; bir dokunuşu engellemez, çizimi bozmaz.
 final class DurakGozcusu: UIGestureRecognizer, UIGestureRecognizerDelegate {
-    var beklemeSuresi: TimeInterval = 0.6
-    var durdu: (() -> Void)?
+    // 2026-11-17 kök neden (Kağan: "kalemi kaldırmadan bekleyince şekil olmuyor"): eski sürüm yalnız KALDIRMA ANINDA
+    // "son 0,6 sn hareket yok mu" diye bakıyordu; kalem kalkarken ucun yaptığı küçük kayma süreyi sıfırladığı için
+    // şekil neredeyse hiç oluşmuyordu. Şimdi: kalem basılıyken 0,5 sn durursa "şekil istendi" İŞARETLENİR (görünür halka),
+    // bu işaret yalnız belirgin yeni çizimle (>14 pt) bozulur; kalem kalkınca şekle çevrilir.
+    var beklemeSuresi: TimeInterval = 0.5
+    var durdu: ((Date) -> Void)?             // çizginin başladığı an (doğru çizgiyi bulmak için)
+    private var baslangic = Date()
     private var sonKonum: CGPoint = .zero
-    private var sonHareket = Date()
+    private var durakKonum: CGPoint = .zero
     private var izleniyor = false
+    private var istendi = false
+    private var zamanlayici: Timer?
+    private let halka = CAShapeLayer()
 
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
         cancelsTouchesInView = false; delaysTouchesBegan = false; delaysTouchesEnded = false
         delegate = self
+        halka.fillColor = UIColor.clear.cgColor
+        halka.strokeColor = Tema.vurguUI.withAlphaComponent(0.75).cgColor
+        halka.lineWidth = 2.5
+        halka.path = UIBezierPath(ovalIn: CGRect(x: -13, y: -13, width: 26, height: 26)).cgPath
     }
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
 
+    private func kur() {
+        zamanlayici?.invalidate()
+        zamanlayici = Timer.scheduledTimer(withTimeInterval: beklemeSuresi, repeats: false) { [weak self] _ in self?.durakVar() }
+    }
+    private func durakVar() {
+        guard izleniyor, !istendi else { return }
+        istendi = true; durakKonum = sonKonum
+        guard let v = view else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        halka.position = sonKonum
+        halka.removeFromSuperlayer(); v.layer.addSublayer(halka)
+        CATransaction.commit()
+        let a = CABasicAnimation(keyPath: "transform.scale"); a.fromValue = 0.4; a.toValue = 1; a.duration = 0.18
+        halka.add(a, forKey: "buyu")
+    }
+    private func temizle() {
+        zamanlayici?.invalidate(); zamanlayici = nil
+        izleniyor = false; istendi = false
+        halka.removeFromSuperlayer()
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard touches.count == 1, let t = touches.first else { return }
-        sonKonum = t.location(in: view); sonHareket = Date(); izleniyor = true
+        sonKonum = t.location(in: view); istendi = false; izleniyor = true; baslangic = Date()
+        kur()
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard izleniyor, let t = touches.first else { return }
         let p = t.location(in: view)
-        if hypot(p.x - sonKonum.x, p.y - sonKonum.y) > 3 { sonKonum = p; sonHareket = Date() }
+        if istendi {
+            // Durduktan sonra çizime belirgin biçimde devam edildiyse şekil isteği iptal; küçük kaymalar (kaldırma) sayılmaz
+            if hypot(p.x - durakKonum.x, p.y - durakKonum.y) > 14 { istendi = false; halka.removeFromSuperlayer(); sonKonum = p; kur() }
+            return
+        }
+        if hypot(p.x - sonKonum.x, p.y - sonKonum.y) > 3 { sonKonum = p; kur() }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        let bekledi = izleniyor && Date().timeIntervalSince(sonHareket) >= beklemeSuresi
-        izleniyor = false
-        if bekledi { durdu?() }
+        let tetikle = izleniyor && istendi
+        temizle()
+        if tetikle { durdu?(baslangic) }
         state = .failed
     }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { izleniyor = false; state = .failed }
-    override func reset() { izleniyor = false }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { temizle(); state = .failed }
+    override func reset() { zamanlayici?.invalidate(); zamanlayici = nil; izleniyor = false }
 }
 
 enum SekilTanima {
@@ -56,13 +95,13 @@ enum SekilTanima {
             // düz çizgi: tüm noktalar uç noktaları birleştiren doğruya yakın
             let sapma = ham.map { uzaklik($0, a, b) }.max() ?? 0
             let d = hypot(b.x - a.x, b.y - a.y)
-            if d > 40, sapma / d < 0.07 { sekil = [a, b] }
+            if d > 30, sapma / d < 0.09 { sekil = [a, b] }
         } else {
             let cx = kutu.midX, cy = kutu.midY, rx = max(kutu.width / 2, 1), ry = max(kutu.height / 2, 1)
             let yaricaplar = ham.map { hypot(($0.x - cx) / rx, ($0.y - cy) / ry) }
             let ort = yaricaplar.reduce(0, +) / CGFloat(yaricaplar.count)
             let sap = (yaricaplar.map { ($0 - ort) * ($0 - ort) }.reduce(0, +) / CGFloat(yaricaplar.count)).squareRoot()
-            if ort > 0.85, ort < 1.15, sap < 0.1 {
+            if ort > 0.82, ort < 1.18, sap < 0.12 {
                 sekil = (0...48).map { i in
                     let t = CGFloat(i) / 48 * 2 * .pi
                     return CGPoint(x: cx + rx * cos(t), y: cy + ry * sin(t))

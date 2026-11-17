@@ -23,6 +23,8 @@ enum Tema {
     static let murekkepUI = dinamik("072d59", "e6f5fd")
     static let soykUI = dinamik("072d59", "e6f5fd", acikA: 0.68, koyuA: 0.72)
     static let camDolguUI = dinamik("ffffff", "dbf2fc", acikA: 0.58, koyuA: 0.09)
+    // Kalem çubuğu (Kağan 2026-11-17: "bir tık koyulaştır, abartmadan"): açıkta beyaz yerine bir ton koyu buz mavisi, koyuda zeminden biraz koyu lacivert
+    static let cubukDolguUI = dinamik("c9dceb", "030c1a", acikA: 0.80, koyuA: 0.60)
     static let camKenarUI = dinamik("ffffff", "dbf2fc", acikA: 0.90, koyuA: 0.22)
     static let camVurguUI = dinamik("ffffff", "dbf2fc", acikA: 0.82, koyuA: 0.16)
     static let dolguUI = dinamik("072d59", "dbf2fc")          // dolu daire, ilerleme çubuğu, birincil düğme
