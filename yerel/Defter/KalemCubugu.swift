@@ -30,6 +30,8 @@ final class KalemCubugu: UIView {
     }
 
     var aracDegisti: (() -> Void)?
+    /// Çubuk kenar değiştirince (sayfa, çubuğun kapladığı şerit kadar içeri çekilsin diye)
+    var konumDegisti: (() -> Void)?
     var resimEkle: ((UIView) -> Void)?
     var geriAl: (() -> Void)?
     var yinele: (() -> Void)?
@@ -340,6 +342,7 @@ final class KalemCubugu: UIView {
             konum = yeni
             UserDefaults.standard.set(yeni.rawValue, forKey: "kalemKonum")
             eksenUygula()
+            konumDegisti?()
             suruklemede = false
             UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0, options: []) {
                 self.setNeedsLayout(); self.layoutIfNeeded()

@@ -296,7 +296,9 @@ final class Tur5Sinavi: XCTestCase {
         // sayfa paneli + ad değiştir
         app.buttons["icindekiler"].tap(); sleep(1)
         app.buttons["sayfaMenu"].tap(); sleep(1)
-        if app.buttons["Çizgili sayfa ekle"].exists { app.buttons["Çizgili sayfa ekle"].tap(); sleep(1) }
+        // Tur 6'dan beri etiket "Çizgili sayfa ekle (bu sayfa gibi)" olabilir; başlangıçla eşle, menü açık kalmasın
+        let cizgili = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Çizgili sayfa ekle'")).firstMatch
+        if cizgili.waitForExistence(timeout: 2) { cizgili.tap(); sleep(1) }
         cek("u11-sayfa-paneli")
         let menu = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'sayfa-menu-'")).firstMatch
         if menu.exists {
@@ -386,9 +388,14 @@ final class Tur6Sinavi: XCTestCase {
         if secim.waitForExistence(timeout: 5) {
             secim.tap(); sleep(7)
             cek("v7-yanyana")
-            if app.buttons["bolmeYonu"].exists { app.buttons["bolmeYonu"].tap(); sleep(3); cek("v8-ustuste") }
-            let ayirici = app.otherElements["bolmeAyirici"]
-            if ayirici.exists {
+            let yon = app.buttons["bolmeYonu"]
+            XCTAssertTrue(yon.waitForExistence(timeout: 5), "Bölme yön düğmesi yok")
+            XCTAssertEqual(yon.label, "Üst üste yap")
+            yon.tap(); sleep(3); cek("v8-ustuste")
+            // Geçiş gerçekten oldu mu: düğmenin etiketi tersine döner
+            XCTAssertEqual(app.buttons["bolmeYonu"].label, "Yan yana yap", "Üst üste geçişi olmadı")
+            let ayirici = app.descendants(matching: .any)["bolmeAyirici"]
+            if ayirici.waitForExistence(timeout: 3) {
                 let s = ayirici.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 s.press(forDuration: 0.2, thenDragTo: s.withOffset(CGVector(dx: 0, dy: -150)))
                 sleep(2); cek("v9-boyut-degisti")

@@ -27,20 +27,12 @@ struct BolunmusEkran: View {
     }
 
     private func ayirici(toplam: CGFloat) -> some View {
+        // Sürükleme yalnız şeridin kendisinde; yön düğmesi şeridin ÜSTÜNDE ayrı bir katman (overlay), böylece dokunuşu
+        // sürükleme jesti yutmaz (CI 44124361267: düğmeye basıldı ama yön değişmedi).
         ZStack {
             Rectangle().fill(Tema.camKenar.opacity(0.9))
             Capsule().fill(Tema.murekkep.opacity(0.35))
                 .frame(width: yanYana ? 5 : 54, height: yanYana ? 54 : 5)
-            Button {
-                withAnimation(.easeInOut(duration: 0.25)) { yanYana.toggle() }
-            } label: {
-                Image(systemName: yanYana ? "rectangle.split.1x2" : "rectangle.split.2x1")
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Tema.murekkep)
-                    .frame(width: 34, height: 34).camYuzey(17)
-            }
-            .buttonStyle(.plain)
-            .offset(x: yanYana ? 0 : 60, y: yanYana ? 60 : 0)
-            .accessibilityIdentifier("bolmeYonu").accessibilityLabel(yanYana ? "Üst üste yap" : "Yan yana yap")
         }
         .frame(width: yanYana ? 14 : nil, height: yanYana ? nil : 14)
         .contentShape(Rectangle())
@@ -50,9 +42,23 @@ struct BolunmusEkran: View {
                 oran = Double(min(max(konum / max(toplam, 1), 0.2), 0.8))
             }
         )
-        // .contain: kapsayıcının kimliği içteki "bolmeYonu" düğmesinin kimliğini ezmesin
-        .accessibilityElement(children: .contain)
+        .accessibilityElement()
         .accessibilityIdentifier("bolmeAyirici")
+        .accessibilityLabel("Bölme ayırıcı")
+        .overlay {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { yanYana.toggle() }
+            } label: {
+                Image(systemName: yanYana ? "rectangle.split.1x2" : "rectangle.split.2x1")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Tema.murekkep)
+                    .frame(width: 34, height: 34).camYuzey(17)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .offset(x: yanYana ? 0 : 60, y: yanYana ? 60 : 0)
+            .accessibilityIdentifier("bolmeYonu")
+            .accessibilityLabel(yanYana ? "Üst üste yap" : "Yan yana yap")
+        }
         .zIndex(1)
     }
 }

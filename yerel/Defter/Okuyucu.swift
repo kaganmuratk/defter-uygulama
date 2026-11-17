@@ -278,13 +278,27 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
     }
 
     // MARK: PDF görünümü
+    // Kalem çubuğu sol/sağ kenara yerleşince sayfa o şerit kadar içeri çekilir; çubuk metnin üstüne binmez (Kağan 2026-11-17, yan yana kesik harfler).
+    // Genişlik değişince viewDidLayoutSubviews → genislikDegisti sığdırmayı yeniden kurar.
+    private lazy var pdfSol = pdfView.leadingAnchor.constraint(equalTo: panelKontrol.view.trailingAnchor)
+    private lazy var pdfSag = pdfView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+    private static let cubukSeridi: CGFloat = 76   // 16 kenar boşluğu + 56 çubuk + 4
+    private func cubukPayiUygula(animasyon: Bool) {
+        let k = kalemCubugu.konum
+        let sol: CGFloat = k == .sol ? Self.cubukSeridi : 0
+        let sag: CGFloat = k == .sag ? -Self.cubukSeridi : 0
+        guard pdfSol.constant != sol || pdfSag.constant != sag else { return }
+        pdfSol.constant = sol; pdfSag.constant = sag
+        if animasyon { UIView.animate(withDuration: 0.28) { self.view.layoutIfNeeded() } } else { view.setNeedsLayout() }
+    }
+
     private func kurPdf() {
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(pdfView, belowSubview: ustCubuk)
         NSLayoutConstraint.activate([
             pdfView.topAnchor.constraint(equalTo: ustCubuk.bottomAnchor),
-            pdfView.leadingAnchor.constraint(equalTo: panelKontrol.view.trailingAnchor),
-            pdfView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            pdfSol,
+            pdfSag,
             pdfView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         pdfView.displayMode = .singlePageContinuous
@@ -399,9 +413,12 @@ final class OkuyucuKontrol: UIViewController, PDFPageOverlayViewProvider, PKCanv
         NSLayoutConstraint.activate([
             kalemCubugu.topAnchor.constraint(equalTo: pdfView.topAnchor),
             kalemCubugu.bottomAnchor.constraint(equalTo: pdfView.bottomAnchor),
-            kalemCubugu.leadingAnchor.constraint(equalTo: pdfView.leadingAnchor),
-            kalemCubugu.trailingAnchor.constraint(equalTo: pdfView.trailingAnchor),
+            // PDF'in kendisine değil okuma alanının tamamına bağlı: PDF çubuk şeridi kadar daralınca çubuk yerinde kalır
+            kalemCubugu.leadingAnchor.constraint(equalTo: panelKontrol.view.trailingAnchor),
+            kalemCubugu.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+        cubukPayiUygula(animasyon: false)
+        kalemCubugu.konumDegisti = { [weak self] in self?.cubukPayiUygula(animasyon: true) }
         kalemCubugu.aracDegisti = { [weak self] in self?.aracUygula() }
         kalemCubugu.resimEkle = { [weak self] kaynak in self?.resimEkleSor(kaynak) }
         kalemCubugu.geriAl = { [weak self] in self?.kendiGeriAlma.undo() }
